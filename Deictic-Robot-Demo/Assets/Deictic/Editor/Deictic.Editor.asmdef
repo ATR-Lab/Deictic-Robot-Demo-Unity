@@ -1,0 +1,5 @@
+{
+  "name": "Deictic.Editor",
+  "references": ["Deictic.Runtime", "Unity.Robotics.ROSTCPConnector", "Oculus.VR", "Oculus.VR.Editor", "Oculus.Interaction", "Unity.XR.Management", "Unity.XR.Management.Editor", "Unity.XR.OpenXR", "Unity.XR.OpenXR.Editor", "Unity.XR.OpenXR.Features.MetaQuestSupport"],
+  "includePlatforms": ["Editor"]
+}

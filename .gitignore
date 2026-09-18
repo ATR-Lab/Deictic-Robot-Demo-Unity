@@ -1,0 +1,34 @@
+# Local agent state, validation copies and downloaded reference repositories.
+.codex/
+
+# Python environments and build products.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.venv*/
+.ruff_cache/
+*.egg-info/
+ros2/build/
+ros2/install/
+ros2/log/
+# Local evidence, logs, builds and temporary captures.
+output/
+*.log
+sim/output/
+tmp/
+
+# Keep credentials and machine-local configuration out of version control.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.DS_Store
+Thumbs.db
+
+# Meta XR Simulator generates these per-machine bindings and recovery files.
+Deictic-Robot-Demo/RuntimeActionBindings.json
+Deictic-Robot-Demo/Assets/StreamingAssets/RuntimeActionBindings.json*
+Deictic-Robot-Demo/Assets/_Recovery/
+Deictic-Robot-Demo/Assets/_Recovery.meta

@@ -130,6 +130,12 @@
         "com.unity.test-framework.performance": "3.2.0"
       }
     },
+    "com.unity.editorcoroutines": {
+      "version": "6.6.0",
+      "depth": 1,
+      "source": "builtin",
+      "dependencies": {}
+    },
     "com.unity.ext.nunit": {
       "version": "2.1.0",
       "depth": 1,
@@ -223,6 +229,20 @@
       "source": "builtin",
       "dependencies": {
         "com.unity.render-pipelines.core": "17.6.0"
+      }
+    },
+    "com.unity.robotics.ros-tcp-connector": {
+      "version": "file:com.unity.robotics.ros-tcp-connector",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
+    },
+    "com.unity.robotics.urdf-importer": {
+      "version": "file:com.unity.robotics.urdf-importer",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {
+        "com.unity.editorcoroutines": "1.0.0"
       }
     },
     "com.unity.searcher": {

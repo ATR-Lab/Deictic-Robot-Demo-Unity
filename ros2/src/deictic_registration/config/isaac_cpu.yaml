@@ -1,0 +1,27 @@
+# Explicit simulation profile, validated on the declared coarse-pattern workcell.
+# Core defaults remain unchanged. This is not a physical Quest calibration profile.
+deictic_registration:
+  ros__parameters:
+    headset_image_topic: /deictic/headset/image_raw
+    headset_compressed: false
+    wrist_compressed: false
+    device: cpu
+    cpu_threads: 4
+    max_keypoints: 512
+    match_filter_threshold: 0.7
+    max_age_s: 3.0
+    input_timeout_s: 2.0
+    sync_slop_s: 0.02
+    min_inliers: 12
+    min_inlier_ratio: 0.35
+    ransac_pixels: 3.0
+    max_median_pixels: 2.0
+    confidence_threshold: 0.7
+
+# Opt-in controller counterpart: ~2 s measured processing plus one update interval.
+# Supply the calibrated URDF/controller settings separately. Execution is not enabled here.
+deictic_control:
+  ros__parameters:
+    synthetic_test: false
+    synthetic_reference_backend: false
+    registration_timeout: 4.5

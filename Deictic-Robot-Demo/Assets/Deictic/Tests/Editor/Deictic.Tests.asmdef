@@ -1,0 +1,6 @@
+{
+  "name": "Deictic.Tests",
+  "references": ["Deictic.Runtime", "Unity.Robotics.ROSTCPConnector", "Unity.Robotics.ROSTCPConnector.Messages", "Unity.Robotics.ROSTCPConnector.MessageGeneration"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"]
+}

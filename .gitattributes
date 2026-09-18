@@ -1,0 +1,28 @@
+# Keep scripts runnable when checking out on either Windows or Linux.
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.cs text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.xml text eol=lf
+*.urdf text eol=lf
+# Unity's serializer writes a space after empty YAML values.
+*.meta text eol=lf whitespace=-blank-at-eol
+*.unity text eol=lf whitespace=-blank-at-eol
+*.prefab text eol=lf whitespace=-blank-at-eol
+*.asset text=auto eol=lf whitespace=-blank-at-eol
+*.mat text=auto eol=lf whitespace=-blank-at-eol
+*.ps1 text eol=crlf
+
+# Vendor meshes and native import libraries are binary assets.
+*.STL binary
+*.stl binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.bundle binary
+*.png binary
+*.jpg binary

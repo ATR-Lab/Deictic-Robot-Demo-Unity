@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 73fde51bd3fd5ee42a8018c8ff70628a, type: 3}
+  m_Name: DeicticSettings
+  m_EditorClassIdentifier: Deictic.Runtime::Deictic.DeicticSettings
+  rosHost: 127.0.0.1
+  rosPort: 10000
+  connectOnStart: 1
+  syntheticScene: 1
+  publishHeadsetCamera: 0
+  agreementDistance: 0.04
+  maximumRayDistance: 4
+  statusTimeout: 1
+  minimumConfidence: 0.65
+  headsetPublishHz: 30
+  bimanualTeleop: 1
+  robotCameraTopic: /deictic/camera_view/stereo/image_raw
+  robotCameraStereo: 1
+  robotCameraTimeout: 1.5
+  cameraControlsWorldPosition: {x: 0, y: 1.25, z: 0.8}
+  robotVisual: {fileID: 6619949836434094872, guid: a6bb49a7dde057e48be77917a9f806cf, type: 3}
+  robotDescription: {fileID: 0}

@@ -48,6 +48,8 @@
     "com.unity.modules.vehicles": "1.0.0",
     "com.unity.modules.video": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
-    "com.unity.modules.xr": "1.0.0"
+    "com.unity.modules.xr": "1.0.0",
+    "com.unity.robotics.ros-tcp-connector": "0.7.0-preview",
+    "com.unity.robotics.urdf-importer": "0.5.2-preview"
   }
 }

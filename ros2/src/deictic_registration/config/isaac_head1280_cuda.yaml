@@ -1,0 +1,37 @@
+# Scheduling-only follow-up: 0.3 s nominal attempts; frozen matcher/depth/gates unchanged.
+# The preserved _05 profile and failed first traversal document the earlier cadence.
+# Native 1280x960 headset RGBD / 640x480 wrist RGB in the declared Isaac workcell.
+# Projection-balanced rigid mount, matte floor. Not a physical-camera calibration.
+# Frozen after six declared development frames, then passed all six fresh captures
+# at the same two static poses. Live observation/motion validation is separate.
+# The estimator retains nearest-pixel optical-Z depth; no oracle neighborhood rule.
+deictic_registration:
+  ros__parameters:
+    headset_image_topic: /deictic/headset/image_raw
+    headset_compressed: false
+    wrist_compressed: false
+    # Reliable publishers retransmit lost large-image fragments; retain only two.
+    # The estimator still uses only the latest synchronized set and enforces 1 s.
+    camera_qos: reliable_latest
+    device: cuda
+    cpu_threads: 4
+    cuda_memory_fraction: 0.25
+    max_keypoints: 512
+    match_filter_threshold: 0.8
+    max_age_s: 1.0
+    input_timeout_s: 2.0
+    registration_period_s: 0.3
+    recovery_period_s: 0.25
+    sync_slop_s: 0.02
+    min_inliers: 12
+    min_inlier_ratio: 0.35
+    ransac_pixels: 3.0
+    max_median_pixels: 2.0
+    confidence_threshold: 0.7
+
+# Keep the original controller freshness/quality gates. Execution is not enabled here.
+deictic_control:
+  ros__parameters:
+    synthetic_test: false
+    synthetic_reference_backend: false
+    registration_timeout: 1.0
