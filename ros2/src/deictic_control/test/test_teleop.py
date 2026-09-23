@@ -4,6 +4,7 @@ from pathlib import Path
 import time
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 from deictic_control.kinematics import ArmModel
 from deictic_control.teleop import (BimanualClutch, ClutchInput, position_jacobian,
                                    check_bimanual_geometry, segment_distance)
@@ -24,17 +25,27 @@ def joints():
 
 
 def packet(sequence=0, stamp=100., clutch=False, **extra):
-    value = dict(schema_version=2, session_id='client_a', sequence=sequence, stamp=stamp,
-                 frame_id='teleop_head', clutch=clutch, left_tracked=True, right_tracked=True,
+    value = dict(schema_version=3, session_id='client_a', sequence=sequence, stamp=stamp,
+                 frame_id='teleop_body', clutch=clutch, left_tracked=True, right_tracked=True,
                  left_position=[0., .2, .1], right_position=[0., -.2, .1],
                  left_rotation=[0.,0.,0.,1.], right_rotation=[0.,0.,0.,1.])
     value.update(extra)
     return json.dumps(value)
 
 
-def start(clutch):
-    assert clutch.ingest(packet(), 100., 10., joints()) == 'released'
-    assert clutch.ingest(packet(1, 100.01, True), 100.01, 10.01, joints()) == 'began'
+def controller_input(clutch, targets):
+    p, r = clutch.mapping.controller_poses(targets)
+    quaternions = Rotation.from_matrix(r).as_quat()
+    return dict(left_position=p[0].tolist(), right_position=p[1].tolist(),
+                left_rotation=quaternions[0].tolist(), right_rotation=quaternions[1].tolist())
+
+
+def start(clutch, targets=None):
+    if targets is None:
+        targets = np.array([m.fk(q) for m, q in zip(clutch.models, joints())])
+    pose = controller_input(clutch, targets)
+    assert clutch.ingest(packet(**pose), 100., 10., joints()) == 'released'
+    assert clutch.ingest(packet(1, 100.01, True, **pose), 100.01, 10.01, joints()) == 'began'
 
 
 @pytest.mark.parametrize('field,value', [('sequence', True), ('stamp', float('nan')),
@@ -45,12 +56,19 @@ def test_malformed_input_rejected(field, value):
         ClutchInput.parse(packet(**{field:value}))
 
 
-def test_initial_held_requires_fresh_release_and_clutch_start_is_zero_motion(clutch):
+def test_initial_held_requires_release_then_immediately_uses_absolute_pose(clutch):
     assert clutch.ingest(packet(0, clutch=True), 100., 10., joints()) == 'rejected'
     assert not clutch.active
     assert clutch.ingest(packet(1), 100., 10., joints()) == 'released'
-    assert clutch.ingest(packet(2, 100.01, True), 100.01, 10.01, joints()) == 'began'
-    np.testing.assert_allclose(clutch.tick(100.06, 10.06, joints()), joints(), atol=1e-12)
+    targets = np.array([m.fk(q) for m, q in zip(clutch.models, joints())])
+    targets[:, 0, 3] += .025
+    assert clutch.ingest(packet(2, 100.01, True, **controller_input(clutch, targets)),
+                         100.01, 10.01, joints()) == 'began'
+    np.testing.assert_allclose(clutch.targets, targets, atol=1e-12)
+    np.testing.assert_array_equal(clutch.command, joints())
+    commanded = clutch.tick(100.06, 10.06, joints())
+    assert np.all(np.max(np.abs(commanded-joints()), axis=1) > 1e-4)
+    assert np.max(np.abs(commanded-joints())) <= .7*.05**2+1e-10
 
 
 def test_analytic_jacobians_match_actual_both_arm_kinematics(clutch):
@@ -62,18 +80,19 @@ def test_analytic_jacobians_match_actual_both_arm_kinematics(clutch):
         np.testing.assert_allclose(jacobian, numeric, atol=1e-9)
 
 
-def test_relative_targets_reduce_both_fk_errors_with_rate_and_acceleration_bounds(clutch):
-    start(clutch)
+def test_absolute_targets_reduce_both_fk_errors_with_rate_and_acceleration_bounds(clutch):
     q = joints()
     target_offsets = np.array([[.025, -.005, -.01], [.025, .005, .01]])
-    positions = np.array([[0., .2, .1], [0., -.2, .1]])+target_offsets
+    targets = np.array([m.fk(arm) for m, arm in zip(clutch.models, q)])
+    targets[:, :3, 3] += target_offsets
+    start(clutch, targets)
+    pose = controller_input(clutch, targets)
     initial_error = np.linalg.norm(target_offsets, axis=1)
     previous_velocity = np.zeros((2, 4))
     elapsed = time.monotonic()
     for i in range(1, 61):
         now = 100.01+i*.05
-        assert clutch.ingest(packet(i+1, now, True, left_position=positions[0].tolist(),
-                                   right_position=positions[1].tolist()), now, 10.01+i*.05, q) == 'updated'
+        assert clutch.ingest(packet(i+1, now, True, **pose), now, 10.01+i*.05, q) == 'updated'
         command = clutch.tick(now, 10.01+i*.05, q)
         assert command is not None, clutch.reason
         velocity = (command-q)/.05
@@ -81,9 +100,56 @@ def test_relative_targets_reduce_both_fk_errors_with_rate_and_acceleration_bound
         assert np.max(np.abs(velocity-previous_velocity)) <= .7*.05+1e-10
         previous_velocity, q = velocity, command
     errors = np.array([np.linalg.norm(model.fk(arm)[:3, 3]-target) for model, arm, target in
-                       zip(clutch.models, q, clutch.tool_start+target_offsets)])
+                       zip(clutch.models, q, targets[:, :3, 3])])
     assert np.all(errors < initial_error*.15), errors
     assert time.monotonic()-elapsed < 3., 'Bounded servo must not stall the ROS executor'
+
+
+def test_reclutch_resamples_absolute_pose_and_independent_arm_goals(clutch):
+    initial = np.array([m.fk(q) for m, q in zip(clutch.models, joints())])
+    start(clutch)
+    assert clutch.ingest(packet(2, 100.02, False), 100.02, 10.02, joints()) == 'released'
+    target = initial.copy(); target[0, 0, 3] += .025
+    assert clutch.ingest(packet(3, 100.03, True, **controller_input(clutch, target)),
+                         100.03, 10.03, joints()) == 'began'
+    np.testing.assert_allclose(clutch.targets, target, atol=1e-12)
+    command = clutch.tick(100.08, 10.08, joints())
+    assert np.max(np.abs(command[0]-joints()[0])) > 1e-4
+    np.testing.assert_allclose(command[1], joints()[1], atol=1e-6)
+    assert clutch.ingest(packet(4, 100.09, False), 100.09, 10.09, command) == 'released'
+    target = initial.copy(); target[1, 0, 3] += .025
+    assert clutch.ingest(packet(5, 100.10, True, **controller_input(clutch, target)),
+                         100.10, 10.10, command) == 'began'
+    np.testing.assert_allclose(clutch.targets, target, atol=1e-12)
+
+
+def test_collision_at_acquisition_rejects_and_colliding_step_holds(clutch, monkeypatch):
+    clutch.obstacles = ((-1., -1., -1., 1., 1., 1.),)
+    assert clutch.ingest(packet(), 100., 10., joints()) == 'released'
+    assert clutch.ingest(packet(1, 100.01, True), 100.01, 10.01, joints()) == 'rejected'
+    assert not clutch.active and clutch.reason == 'teleop_obstacle_clearance'
+    clutch.obstacles = ()
+    clutch.ingest(packet(2, 100.02, False), 100.02, 10.02, joints())
+    target = np.array([m.fk(q) for m, q in zip(clutch.models, joints())])
+    target[:, 0, 3] += .025
+    clutch.ingest(packet(3, 100.03, True, **controller_input(clutch, target)), 100.03, 10.03, joints())
+    def collision(*args): raise ValueError('teleop_cross_arm_clearance')
+    monkeypatch.setattr('deictic_control.teleop.check_bimanual_geometry', collision)
+    np.testing.assert_array_equal(clutch.tick(100.08, 10.08, joints()), joints())
+    assert clutch.active and clutch.state == 'limited'
+    assert clutch.reason == 'teleop_cross_arm_clearance'
+
+
+@pytest.mark.parametrize('invalid', [dict(left_position=[float('nan'), 0., 0.]),
+                                    dict(right_rotation=[0., 0., 0., 0.])])
+def test_invalid_active_pose_holds_previous_command_and_requires_release(clutch, invalid):
+    start(clutch)
+    previous_command = clutch.command.copy()
+    assert clutch.ingest(packet(2, 100.02, True, **invalid), 100.02, 10.02, joints()) == 'rejected'
+    assert not clutch.active and not clutch.armed
+    np.testing.assert_array_equal(clutch.command, previous_command)
+    assert clutch.tick(100.06, 10.06, joints()) is None
+    assert clutch.ingest(packet(3, 100.07, True), 100.07, 10.07, joints()) == 'rejected'
 
 
 @pytest.mark.parametrize('cause', ['timeout', 'tracking', 'future', 'stale', 'feedback', 'deadline'])

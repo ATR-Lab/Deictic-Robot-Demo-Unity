@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 from scipy.spatial.transform import Rotation
 from deictic_control.kinematics import ArmModel
-from deictic_control.teleop import BimanualClutch, ClutchInput, PoseIK, chain_reach
+from deictic_control.teleop import AnatomicalArmMapping, BimanualClutch, ClutchInput, PoseIK, chain_reach
 
 
 @pytest.fixture
@@ -20,6 +20,7 @@ class Driver:
     def __init__(self, servo):
         self.servo, self.sequence = servo, 0
         self.q = np.array([[0., 0., 0., 0.], [0., .5, 0., 0.]])
+        self.initial_poses = np.array([m.fk(q) for m, q in zip(servo.models, self.q)])
         self.position, self.quat = np.zeros((2, 3)), np.tile([0., 0., 0., 1.], (2, 1))
         self.send(False); self.send(True)
         self.previous_velocity = np.zeros((2, 4))
@@ -28,10 +29,15 @@ class Driver:
     def send(self, held=True):
         self.sequence += 1
         self.now = 100.+self.sequence*.05
-        payload = dict(schema_version=2, frame_id='teleop_head', session_id='pose_test',
+        targets = self.initial_poses.copy()
+        targets[:, :3, 3] += self.position
+        targets[:, :3, :3] = Rotation.from_quat(self.quat).as_matrix()@self.initial_poses[:, :3, :3]
+        positions, rotations = self.servo.mapping.controller_poses(targets)
+        quaternions = Rotation.from_matrix(rotations).as_quat()
+        payload = dict(schema_version=3, frame_id='teleop_body', session_id='pose_test',
             sequence=self.sequence, stamp=self.now, clutch=held, left_tracked=True, right_tracked=True,
-            left_position=self.position[0].tolist(), right_position=self.position[1].tolist(),
-            left_rotation=self.quat[0].tolist(), right_rotation=self.quat[1].tolist())
+            left_position=positions[0].tolist(), right_position=positions[1].tolist(),
+            left_rotation=quaternions[0].tolist(), right_rotation=quaternions[1].tolist())
         return self.servo.ingest(json.dumps(payload), self.now, self.now, self.q)
 
     def step(self, feedback=True, bounds=True):
@@ -54,10 +60,11 @@ class Driver:
         return command
 
 
-def test_v1_explicitly_fails_and_rotations_require_unit_finite_quaternions():
-    with pytest.raises(ValueError, match='protocol_version_mismatch'):
-        ClutchInput.parse(json.dumps(dict(schema_version=1)))
-    base = dict(schema_version=2, frame_id='teleop_head', session_id='a', sequence=1,
+def test_old_protocols_explicitly_fail_and_rotations_require_unit_finite_quaternions():
+    for version in (1, 2):
+        with pytest.raises(ValueError, match='protocol_version_mismatch'):
+            ClutchInput.parse(json.dumps(dict(schema_version=version)))
+    base = dict(schema_version=3, frame_id='teleop_body', session_id='a', sequence=1,
         stamp=100., clutch=False, left_tracked=True, right_tracked=True,
         left_position=[0,0,0], right_position=[0,0,0], left_rotation=[0,0,0,1], right_rotation=[0,0,0,1])
     for bad in ([0,0,0,0], [0,0,0,2], [0,0,float('nan'),1], [0,0,1]):
@@ -65,13 +72,36 @@ def test_v1_explicitly_fails_and_rotations_require_unit_finite_quaternions():
             ClutchInput.parse(json.dumps(dict(base, left_rotation=bad)))
 
 
-def test_arm_scale_excludes_shoulder_mount_and_small_neutral_noise_never_moves(servo):
+def test_arm_scale_excludes_shoulder_mount_and_small_input_noise_is_bounded(servo):
     assert chain_reach(servo.models[0])/.60 == pytest.approx(.558833641)
     driver = Driver(servo)
     driver.position[:] = [3e-7, -2e-7, 1e-7]
     driver.quat[:] = Rotation.from_rotvec([1e-6,0,0]).as_quat()
     for _ in range(5):
-        np.testing.assert_array_equal(driver.step(), driver.q)
+        before = driver.q.copy()
+        np.testing.assert_allclose(driver.step(), before, atol=1e-4)
+
+
+def test_stationary_hands_in_front_of_chest_move_both_arms_from_initial_clutch(servo):
+    # Literal human measurements, independently chosen rather than produced by
+    # inverse robot FK: hands 35 cm forward, 20 cm sideways, 40 cm below head.
+    servo = BimanualClutch(servo.models, translation_scale=chain_reach(servo.models[0])/.60)
+    rest = q = np.array([[0., 0., 0., 0.], [0., .5, 0., 0.]])
+    for sequence in range(222):
+        stamp = 100.+sequence*.05
+        payload = dict(schema_version=3, frame_id='teleop_body', session_id='chest_pose',
+            sequence=sequence, stamp=stamp, clutch=sequence > 0, left_tracked=True, right_tracked=True,
+            left_position=[.35, .20, -.40], right_position=[.35, -.20, -.40],
+            left_rotation=[0., 0., 0., 1.], right_rotation=[0., 0., 0., 1.])
+        servo.ingest(json.dumps(payload), stamp, stamp, q)
+        if sequence > 1:
+            before = q.copy()
+            q = servo.tick(stamp, stamp, q)
+            assert q is not None, servo.reason
+            assert np.max(np.abs(q-before)) <= .35*.05+1e-10
+    assert np.all(np.max(np.abs(q-rest), axis=1) > .5)
+    assert max(servo.measured_position_errors) < .003
+    assert servo.active and servo.reason == 'teleop_orientation_limited'
 
 
 @pytest.mark.parametrize('axis,sign', [(0,-1),(0,1),(1,-1),(1,1),(2,-1),(2,1)])
@@ -122,7 +152,11 @@ def test_saturation_returns_without_a_release_and_pure_orientation_moves(servo):
     driver.position[:, 0] = .025
     for _ in range(120): driver.step()
     assert max(servo.measured_position_errors) < .004 and servo.active
-    # Reclutch at measured pose, then turn only the controller orientation.
+    # Explicitly send the inverse-mapped measured pose, then rotate it. Unlike
+    # the old relative mode, a clutch no longer changes orientation references.
+    driver.initial_poses = np.array([m.fk(q) for m, q in zip(servo.models, driver.q)])
+    driver.position[:] = 0.
+    driver.quat[:] = [0., 0., 0., 1.]
     driver.send(False); driver.send(True)
     driver.previous_velocity[:] = 0.
     target = Rotation.from_rotvec([0., 0., .3]).as_matrix()
@@ -134,7 +168,7 @@ def test_saturation_returns_without_a_release_and_pure_orientation_moves(servo):
     assert max(servo.measured_orientation_errors) < .3
 
 
-def test_pose_jacobian_analytic_rotation_derivative_and_clutch_rotation_order(servo):
+def test_pose_jacobian_analytic_rotation_derivative_and_absolute_rotation_order(servo):
     driver = Driver(servo)
     driver.send(False)
     start_rotation = Rotation.from_euler('xyz', [.2,-.3,.1]).as_matrix()
@@ -144,7 +178,8 @@ def test_pose_jacobian_analytic_rotation_derivative_and_clutch_rotation_order(se
     driver.quat[:] = Rotation.from_matrix(change@start_rotation).as_quat()
     driver.step()
     for i in range(2):
-        np.testing.assert_allclose(servo.targets[i,:3,:3], change@servo.tool_poses_start[i,:3,:3], atol=1e-12)
+        np.testing.assert_allclose(servo.targets[i,:3,:3],
+                                  change@start_rotation@driver.initial_poses[i,:3,:3], atol=1e-12)
     for solver in servo.solvers:
         q = np.clip(np.array([-.3, .2, -.4, .1]), solver.model.lower, solver.model.upper)
         pose, jac = solver.kinematics(q)
@@ -153,3 +188,31 @@ def test_pose_jacobian_analytic_rotation_derivative_and_clutch_rotation_order(se
             moved, _ = solver.kinematics(q+np.eye(4)[j]*1e-6)
             angular = Rotation.from_matrix(moved[:3,:3]@pose[:3,:3].T).as_rotvec()/1e-6
             np.testing.assert_allclose(angular, jac[3:,j], atol=1e-8)
+
+
+def test_absolute_anatomical_mapping_uses_robot_shoulders_reach_and_tool_axes(servo):
+    mapping = AnatomicalArmMapping(servo.models, chain_reach(servo.models[0])/.60)
+    np.testing.assert_allclose(mapping.robot_shoulders, [[0, .077, .1845], [0, -.077, .1845]])
+    # Human arms point straight forward from their estimated shoulders.
+    position = mapping.human_shoulders+[[.40, 0., 0.], [.40, 0., 0.]]
+    target = mapping.targets(position, np.tile(np.eye(3), (2, 1, 1)))
+    np.testing.assert_allclose(target[:, :3, 3], mapping.robot_shoulders+[[.40*mapping.scale, 0, 0]]*2)
+    for i, axis in enumerate(([0, 1, 0], [0, -1, 0])):
+        np.testing.assert_allclose(target[i, :3, :3]@axis, [1, 0, 0], atol=1e-12)
+    projected, limited = mapping.project(target)
+    assert not limited
+    np.testing.assert_allclose(projected, target)
+    target[:, 0, 3] += 2.
+    projected, limited = mapping.project(target)
+    assert limited
+    np.testing.assert_allclose(np.linalg.norm(projected[:, :3, 3]-mapping.robot_shoulders, axis=1), mapping.reach)
+    # Projecting absolute reach is independent of any previously captured pose.
+    p, r = mapping.controller_poses(projected)
+    np.testing.assert_allclose(mapping.targets(p, r), projected, atol=1e-12)
+
+
+@pytest.mark.parametrize('values', [dict(shoulder_half_width=0.), dict(shoulder_down=float('nan')),
+    dict(shoulder_forward=1.), dict(tool_yaw_degrees=[0.]), dict(scale=0.)])
+def test_invalid_anatomical_calibration_rejected(servo, values):
+    with pytest.raises(ValueError, match='invalid_teleop_anatomical_mapping'):
+        AnatomicalArmMapping(servo.models, **values)

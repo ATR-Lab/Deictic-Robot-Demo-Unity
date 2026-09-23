@@ -171,10 +171,15 @@ round trip before enabling commits.
 ## Robot head-stereo display stream
 
 `run_bridge.sh` also starts `camera_view_relay.py`. Unity's viewer subscribes to
-`/deictic/camera_view/stereo/image_raw`: one atomic RGB8 side-by-side image,
-left eye in the left half and right eye in the right half. Each eye is at most
-480×360, so the combined frame is at most 960×360 at 5 Hz. Maximum pixel payload
-is 5.184 MB/s (about 41.5 Mbit/s); TCP/SSH framing adds overhead. The estimator
+`/deictic/camera_view/stereo/image_raw/compressed`: one atomic side-by-side
+`sensor_msgs/CompressedImage`, encoded at JPEG quality 80, with the left eye in
+the left half and right eye in the right half. The simulator defaults to
+**320×240 per eye** (640×240 combined) and a **15 Hz source publication cap**.
+The optional 640×480 source is reduced to at most 480×360 per eye (960×360
+combined). JPEG payload size varies with image content. The legacy raw
+`sensor_msgs/Image` output remains available on demand at
+`/deictic/camera_view/stereo/image_raw`. Configured rates are not guarantees of
+achieved frame rate or motion-to-display latency. The estimator
 continues using the untouched full-resolution `/k1/wrist_camera/image_raw`
 together with the separate headset RGBD input. Head stereo is for display.
 
@@ -194,18 +199,26 @@ queue; retransmitted fragments still have to meet the original freshness limit.
 It uses OpenCV area downsampling without changing aspect ratio or upscaling,
 and rejects malformed, oversized, duplicate, future, or expired frames before
 publication. It never restamps old pixels. The default relay age limit is one
-second. Unity subscribes only in Robot view, labels missing/stale data and
-hides an expired image using its configured 1.5-second viewer timeout.
+second. The relay checks for a latest pair every 5 ms, with a separate 30 Hz
+output cap; the default source cap remains 15 Hz. Compression/raw publication
+runs only for requested outputs. Unity subscribes only in Robot view, decodes
+the latest complete frame after Connector processing each update without a
+separate 5 Hz polling delay, labels missing/stale data and hides an expired
+image using its configured 1.5-second viewer timeout.
 
 The ROS-enabled Isaac adapter enables this display source by default, with
 `--no-head-stereo` as an opt-out. Its extra render products run only while an
-eye's image or CameraInfo topic has a subscriber, at no more than 5 Hz.
+eye's image or CameraInfo topic has a subscriber and stay continuously enabled
+between pairs during that demand. `--head-stereo-width 640` selects native
+640×480 eyes; `--head-stereo-rate HZ` changes the source publication cap within
+1–30 Hz (default 15). The render products stop when the last demand ends.
 Closing the last display consumer therefore releases both relay subscriptions
 and render demand, unless another head-camera consumer remains. The virtual
 eyes use a provisional 64 mm baseline around the vendor head optical mount;
 this is simulation geometry, not a measured physical stereo calibration.
 
-Unity places the toggle and monitor at a fixed world pose. The existing
+Unity places the toggle at a fixed world pose while the robot POV fills the
+headset display. The existing
 controller ray hovers the button; Trigger (or Space over the button) toggles
 it without selecting a target. V is a direct keyboard shortcut. Each XR eye
 samples its corresponding half; desktop/mono rendering shows the left eye.
@@ -213,6 +226,24 @@ The default toggle center `(0, 1.25, 0.8)` meters is configured by
 `cameraControlsWorldPosition`. Camera pixels are not target-selection surfaces;
 return to User view to commit a target. Existing valid previews can still be
 executed with A/Enter, and B/Escape cancels in either view.
+
+In Robot POV, Unity's head-orientation commands target 50 Hz independently of
+the arm publisher's 20 Hz. Neck yaw/pitch turn the stereo cameras within the
+URDF limits. The underlying physics catch-up uses observed Isaac world time
+with bounded accumulated lag; these scheduling changes do not establish
+measured response latency. See the [simulation timing and measurement
+instructions](../sim/README.md#robot-head-stereo-display).
+
+`run_bridge.sh` launches the pinned endpoint through `run_endpoint.py`. This
+wrapper adds the missing `__remove_subscriber` handler so returning to User
+view releases camera demand without closing the shared control connection.
+Its outgoing queue also retains at most one **unsent** image for each of the
+two display topic names above: a newer frame replaces an older pending frame.
+Other topics, including control/status and service traffic, retain FIFO
+ordering. Bytes already sent to TCP cannot be withdrawn. The embedded Unity
+Connector enables `TCP_NODELAY` so small pose/clock packets are not deliberately
+held by Nagle's pending-acknowledgement batching. Neither change bypasses
+timestamps, motion leases or stale-frame rejection.
 
 For an already-running bridge, launch only this additional process in the same
 sourced ROS environment/domain (do not start a second endpoint):
@@ -223,12 +254,19 @@ ROS_DOMAIN_ID=42 FASTDDS_BUILTIN_TRANSPORTS=UDPv4 \
 ```
 
 ROS parameters `left_source_topic`, `right_source_topic`, `output_topic`,
-`max_width`, `max_height`, `display_hz`, and `max_age_s` configure this
-display-only path. Width/height bounds are per eye; they and the rate may be
-reduced from the 480×360/5 Hz caps. NumPy and system OpenCV are required.
+`compressed_topic`, `max_width`, `max_height`, `display_hz`, `max_age_s`, and
+`jpeg_quality` configure this display-only path. Width/height bounds are per
+eye, at most 480×360. The default relay output cap is 30 Hz and JPEG quality
+is 80; the source controls its own capture/publication cap. NumPy and system
+OpenCV are required.
 The former single `source_topic` parameter has been replaced by the two eye
-parameters. Update existing Unity scenes' `robotCameraTopic` and set
-`robotCameraStereo=true` when using this relay.
+parameters. Update existing Unity scenes' `robotCameraTopic` to the compressed
+topic and set `robotCameraStereo=true` when using this relay. Deploy the same
+project revision to Unity and the workstation, including `run_endpoint.py`,
+the relay and `sim/head_stereo.py` / `sim/loop_timing.py`, then restart the
+affected services. The one-command launcher transfers only its supervisor;
+it checks required files exist but does not synchronize or verify their
+revision. Start the endpoint through `run_bridge.sh` to apply its wrapper.
 
 ## Contract
 
@@ -242,7 +280,8 @@ read from the pinned vendor URDF; its first name really is
 |---|---|---|
 | `/k1/head_camera/left/image_raw` | `sensor_msgs/Image` | Left robot-head RGB8 display source; paired acquisition stamp |
 | `/k1/head_camera/right/image_raw` | `sensor_msgs/Image` | Right robot-head RGB8 display source; paired acquisition stamp |
-| `/deictic/camera_view/stereo/image_raw` | `sensor_msgs/Image` | Atomic left/right SBS display, up to 960×360 at 5 Hz; common acquisition stamp, frame `k1_head_stereo_optical` |
+| `/deictic/camera_view/stereo/image_raw/compressed` | `sensor_msgs/CompressedImage` | Default Unity display: atomic JPEG-quality-80 SBS, normally 640×240 total, 15 Hz source cap; common acquisition stamp, frame `k1_head_stereo_optical` |
+| `/deictic/camera_view/stereo/image_raw` | `sensor_msgs/Image` | Legacy atomic RGB8 SBS display on demand, at most 960×360 total; same acquisition stamp and stereo frame |
 | `/deictic/headset_pose` | `geometry_msgs/PoseStamped` | Headset pose in `headset_world` |
 | `/deictic/goal` | `geometry_msgs/PoseStamped` | Deliberate goal in `base_link`, fresh UTC stamp |
 | `/deictic/preview` | `trajectory_msgs/JointTrajectory` | Validated preview; header stamp echoes its goal; empty clears it |

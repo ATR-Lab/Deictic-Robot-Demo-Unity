@@ -786,7 +786,9 @@ namespace Unity.Robotics.ROSTCPConnector
                 {
                     ROSConnection.m_HasConnectionError = true; // until we actually see a reply back, assume there's a problem
 
-                    client = new TcpClient();
+                    // Pose/clock packets are small and latency-sensitive; do
+                    // not hold a new sample for Nagle's pending-ACK batching.
+                    client = new TcpClient { NoDelay = true };
                     client.Connect(rosIPAddress, rosPort);
 
                     NetworkStream networkStream = client.GetStream();

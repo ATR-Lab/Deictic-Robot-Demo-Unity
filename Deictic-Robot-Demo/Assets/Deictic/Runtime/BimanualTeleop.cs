@@ -6,10 +6,12 @@ namespace Deictic
     public sealed class BimanualTeleop : MonoBehaviour
     {
         public DeicticBridge bridge;
-        public Transform head, leftController, rightController;
+        public Transform head, bodyFrame, leftController, rightController;
         public BimanualClutch Clutch { get; } = new BimanualClutch();
         public bool LeftHeld { get; private set; }
         public bool RightHeld { get; private set; }
+        public float LeftTriggerValue => leftTrigger.Value;
+        public float RightTriggerValue => rightTrigger.Value;
         public bool SuppressActions => isActiveAndEnabled && Clutch.SuppressActions;
         public event System.Action Interrupted;
         public string Feedback
@@ -18,7 +20,7 @@ namespace Deictic
             {
                 string state = Clutch.Active || Clutch.AwaitingRelease ? Clutch.Reason :
                     bridge != null && !bridge.CanTeleoperate ? "Arm control waiting: " +
-                    (!bridge.TeleopProtocolCompatible ? "backend protocol v2 required" :
+                    (!bridge.TeleopProtocolCompatible ? "backend protocol v3 required" :
                         bridge.Status?.teleop_reason ?? "fresh ROS status and clock") : Clutch.Reason;
                 if (bridge != null && !string.IsNullOrEmpty(bridge.LastTeleopFault))
                     state += "\nLast arm stop: " + bridge.LastTeleopFault;
@@ -34,6 +36,8 @@ namespace Deictic
         static bool ValidPair(float[] values) => values != null && values.Length == 2 &&
             float.IsFinite(values[0]) && float.IsFinite(values[1]);
         bool focused = true, paused;
+        readonly IndexTriggerState leftTrigger = new IndexTriggerState();
+        readonly IndexTriggerState rightTrigger = new IndexTriggerState();
 
         void OnEnable() { OVRManager.InputFocusLost += OnInputFocusLost; }
         void Start() { if (bridge != null) bridge.TeleopStopRequested += OnStopRequested; }
@@ -41,8 +45,10 @@ namespace Deictic
         // Called before deictic input dispatch, so a chord never leaks a click.
         public void Tick(bool xrActive)
         {
-            LeftHeld = xrActive && OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.LTouch);
-            RightHeld = xrActive && OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch);
+            leftTrigger.Sample(xrActive ? OVRInput.Get(OVRInput.RawAxis1D.LIndexTrigger, OVRInput.Controller.LTouch) : 0, xrActive);
+            rightTrigger.Sample(xrActive ? OVRInput.Get(OVRInput.RawAxis1D.RIndexTrigger, OVRInput.Controller.RTouch) : 0, xrActive);
+            LeftHeld = leftTrigger.Held;
+            RightHeld = rightTrigger.Held;
             bool leftTracked = xrActive && leftController && OVRInput.IsControllerConnected(OVRInput.Controller.LTouch) &&
                 OVRInput.GetControllerPositionTracked(OVRInput.Controller.LTouch) && OVRInput.GetControllerOrientationTracked(OVRInput.Controller.LTouch);
             bool rightTracked = xrActive && rightController && OVRInput.IsControllerConnected(OVRInput.Controller.RTouch) &&
@@ -50,11 +56,14 @@ namespace Deictic
             bool headTracked = xrActive && head && OVRPlugin.GetNodePositionTracked(OVRPlugin.Node.EyeCenter) &&
                 OVRPlugin.GetNodeOrientationTracked(OVRPlugin.Node.EyeCenter);
             bool hasFocus = focused && !paused && (!xrActive || OVRManager.hasInputFocus);
-            bool publish = Clutch.Step(Time.realtimeSinceStartupAsDouble, LeftHeld, RightHeld, leftTracked, rightTracked,
+            bool publish = Clutch.Step(Time.realtimeSinceStartupAsDouble, LeftHeld, RightHeld,
+                leftTracked && leftTrigger.Valid, rightTracked && rightTrigger.Valid,
                 headTracked, hasFocus, bridge != null && bridge.CanTeleoperate,
                 head ? head.position : Vector3.zero, head ? head.rotation : Quaternion.identity,
+                bodyFrame ? bodyFrame.rotation : Quaternion.identity,
                 leftController ? leftController.position : Vector3.zero, leftController ? leftController.rotation : Quaternion.identity,
-                rightController ? rightController.position : Vector3.zero, rightController ? rightController.rotation : Quaternion.identity);
+                rightController ? rightController.position : Vector3.zero, rightController ? rightController.rotation : Quaternion.identity,
+                !xrActive || leftTrigger.FullyReleased, !xrActive || rightTrigger.FullyReleased);
             bridge?.SetTeleopIntent(SuppressActions);
             if (publish && bridge != null)
                 bridge.PublishTeleop(Clutch.Active, leftTracked && Clutch.PoseValid, rightTracked && Clutch.PoseValid,

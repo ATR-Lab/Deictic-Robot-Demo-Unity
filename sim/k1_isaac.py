@@ -6,8 +6,10 @@ from pathlib import Path
 import tempfile
 import time
 
-from k1_model import BOTH_ARM_JOINTS, TOOL_OFFSET, URDF, fixed_arm_urdf, joint_limits
+from k1_model import BOTH_ARM_JOINTS, HEAD_JOINTS, UPPER_BODY_JOINTS, TOOL_OFFSET, URDF, fixed_arm_urdf, joint_limits
 from command_control import ArmSetpoints
+from head_control import HeadSetpoints, MAX_COMMAND_BYTES
+from loop_timing import RealtimeSchedule, drain_callbacks
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--headless", action="store_true")
@@ -22,13 +24,17 @@ head_stereo_options.add_argument("--no-head-stereo", dest="head_stereo", action=
 parser.set_defaults(head_stereo=None)
 parser.add_argument("--head-stereo-baseline", type=float, default=.064,
                     help="Assumed simulation-only stereo baseline in metres; not physical calibration")
-parser.add_argument("--head-stereo-width", type=int, choices=(320,640), default=640,
-                    help="Per-eye display width, 4:3 aspect; render/publish only on demand at up to 5 Hz")
+parser.add_argument("--head-stereo-width", type=int, choices=(320,640), default=320,
+                    help="Per-eye display width, 4:3 aspect; 320 reduces stereo RTX cost")
+parser.add_argument("--head-stereo-rate", type=float, default=15.,
+                    help="Newest coherent stereo publication cap, 1..30 Hz; render products stay warm on demand")
 parser.add_argument("--headset-resolution-scale", type=int, choices=(1,2), default=1,
                     help="Native headset RGBD render scale: 1=640x480, 2=1280x960; field of view is unchanged")
 parser.add_argument("--webrtc", action="store_true", help="Enable Isaac Sim 5.0 WebRTC streaming on TCP49100/UDP47998")
 parser.add_argument("--public-ip", default="", help="Server IP reachable by the WebRTC client")
 parser.add_argument("--steps", type=int, default=0, help="Stop after N physics steps; zero runs continuously")
+parser.add_argument("--legacy-loop-timing", action="store_true",
+                    help="Diagnostic comparison: historical render-every-four-step timing without wall-time catch-up")
 parser.add_argument("--output", type=Path, default=Path(__file__).parent / "artifacts")
 parser.add_argument("--tool-offset", nargs=3, type=float, default=TOOL_OFFSET)
 parser.add_argument("--camera-offset", nargs=3, type=float, default=(0.0, -0.10, 0.08))
@@ -40,6 +46,8 @@ parser.add_argument("--textured-table", action="store_true", help="Add nonrepeat
 parser.add_argument("--floor-profile", choices=("grid", "matte"), default="grid",
                     help="grid preserves the Isaac default; matte replaces only its visual material with uniform diffuse gray")
 args = parser.parse_args()
+if not 1. <= args.head_stereo_rate <= 30.:
+    parser.error("--head-stereo-rate must be in [1, 30] Hz")
 
 from isaacsim import SimulationApp
 app = SimulationApp({"headless": args.headless, "hide_ui": not args.webrtc,
@@ -201,7 +209,7 @@ def main():
             drive = UsdPhysics.DriveAPI.Apply(prim, "angular")
             drive.CreateStiffnessAttr(80.0)
             drive.CreateDampingAttr(4.0)
-            drive.CreateMaxForceAttr(14.0)
+            drive.CreateMaxForceAttr(6.0 if prim.GetName() in HEAD_JOINTS else 14.0)
     matches = [prim for prim in stage.Traverse() if prim.GetName() == "right_elbow_yaw_link"
                and prim.HasAPI(UsdPhysics.RigidBodyAPI)]
     if len(matches) != 1:
@@ -259,31 +267,44 @@ def main():
         headset.attach_annotator("CameraParams")
         headset.add_distance_to_image_plane_to_frame()
     names = robot.dof_names
-    if set(names) != set(BOTH_ARM_JOINTS):
-        raise RuntimeError(f"Fixed-arm importer produced unexpected DOFs: {names}")
+    if set(names) != set(UPPER_BODY_JOINTS):
+        raise RuntimeError(f"Fixed-base upper-body importer produced unexpected DOFs: {names}")
     indices = [names.index(name) for name in BOTH_ARM_JOINTS]
+    head_indices = [names.index(name) for name in HEAD_JOINTS]
+    upper_body_indices = indices + head_indices
     # Preserve the old fixture: the formerly locked left arm starts at zero;
-    # the right arm keeps its validated rest pose. Head and legs stay fixed.
+    # the right arm keeps its validated rest pose. Neck starts forward; legs stay fixed.
     initial = np.array([0., 0., 0., 0., 0., 0.5, 0., 0.])
     robot.set_joint_positions(initial, joint_indices=indices)
     robot.set_joint_velocities(np.zeros(8), joint_indices=indices)
-    initial = np.array(robot.get_joint_positions()[indices], dtype=float)
+    robot.set_joint_positions(np.zeros(2), joint_indices=head_indices)
+    robot.set_joint_velocities(np.zeros(2), joint_indices=head_indices)
+    initial_state = robot.get_joint_positions()
+    initial = np.array(initial_state[indices], dtype=float)
     desired = initial.copy()
     limits = joint_limits()
     setpoints = ArmSetpoints(initial.tolist(), limits)
+    head_setpoints = HeadSetpoints(initial_state[head_indices].tolist(), limits)
+    head_desired = np.asarray(head_setpoints.desired)
     node = None
+    executor = None
     if not args.no_ros:
         global PoseStamped
         import rclpy
+        from rclpy.executors import SingleThreadedExecutor
         from geometry_msgs.msg import PoseStamped
         from sensor_msgs.msg import JointState, Image, CameraInfo
+        from std_msgs.msg import String
         rclpy.init()
         node = rclpy.create_node("k1_fixed_base_isaac")
+        executor = SingleThreadedExecutor()
+        executor.add_node(node)
         state_pub = node.create_publisher(JointState, "/joint_states", 10)
         ee_pub = node.create_publisher(PoseStamped, "/k1/end_effector_pose", 10)
         camera_pose_pub = node.create_publisher(PoseStamped, "/k1/wrist_camera/pose", 10)
         image_pub = node.create_publisher(Image, "/k1/wrist_camera/image_raw", 2)
         info_pub = node.create_publisher(CameraInfo, "/k1/wrist_camera/camera_info", 2)
+        head_status_pub = node.create_publisher(String, "/k1/head/status", 1)
         if headset:
             head_image_pub = node.create_publisher(Image, "/deictic/headset/image_raw", 2)
             head_depth_pub = node.create_publisher(Image, "/deictic/headset/depth", 2)
@@ -300,12 +321,22 @@ def main():
         # Rendering may run slower than the relay: only the latest stamped
         # setpoint may cross the actuator boundary, never an old buffered queue.
         node.create_subscription(JointState, "/k1/sim/joint_commands", command, 1)
+
+        def head_command(message):
+            try:
+                if len(message.data.encode("utf-8")) > MAX_COMMAND_BYTES:
+                    raise ValueError("Head command exceeds bounded JSON payload size")
+                head_setpoints.command(json.loads(message.data), time.monotonic(),
+                                       node.get_clock().now().nanoseconds*1e-9)
+            except (ValueError, TypeError, OverflowError, RecursionError) as error:
+                node.get_logger().error(str(error))
+        node.create_subscription(String, "/k1/head/command", head_command, 1)
     head_stereo = None
     enable_head_stereo = args.head_stereo if args.head_stereo is not None else not args.no_ros
     if enable_head_stereo:
         from head_stereo import HeadStereoDisplay
         head_stereo = HeadStereoDisplay(stage, args.output, node, configure_camera, intrinsics,
-                                        args.head_stereo_baseline, args.head_stereo_width)
+                                        args.head_stereo_baseline, args.head_stereo_width, args.head_stereo_rate)
     print("DEICTIC_K1_READY " + json.dumps({"joints": names, "base_frame": "base_link", "robot_root": root_path}), flush=True)
     first = None
     rendered = None
@@ -314,50 +345,117 @@ def main():
     pair_captured = False
     last_camera_reference = None
     next_camera_publication = 0.0
+    next_head_status = 0.0
+    timing = RealtimeSchedule(time.monotonic(), float(world.current_time))
+    next_timing_diagnostic = 0.0
+    # Constant-size aggregates expose CPU/GPU synchronization cost without
+    # logging every physics iteration or retaining individual measurements.
+    profile_sections = {}
+    def profile_section(name, started):
+        elapsed = time.monotonic()-started
+        total, count, maximum = profile_sections.get(name, (0., 0, 0.))
+        profile_sections[name] = (total+elapsed, count+1, max(maximum, elapsed))
+    tool_offset = np.asarray(args.tool_offset)
     camera_start_deadline = time.monotonic()+30.
     try:
         while app.is_running() and (not args.steps or completed < args.steps):
             begin = time.monotonic()
             if frame_count == 0 and begin > camera_start_deadline:
                 raise RuntimeError("No synchronized cached RGB/depth/CameraParams frames after 30 seconds")
-            if node:
-                rclpy.spin_once(node, timeout_sec=0)
+            if executor:
+                # Depth-one subscriptions plus a bounded drain give both head
+                # and arm commands a turn before any post-render catch-up.
+                section_started = time.monotonic()
+                drain_callbacks(executor.spin_once)
+                profile_section("ros_callbacks", section_started)
+            if args.smoke or args.legacy_loop_timing:
+                render_this_step = completed % 4 == 0
+            else:
+                physics_due, render_this_step, delay = timing.plan(time.monotonic(), float(world.current_time))
+                if not physics_due:
+                    time.sleep(delay)
+                    continue
             if args.smoke and completed == 60:
                 desired = initial + np.array([0.,-.12,0.,0.,-.20,.12,.10,.05])
+                head_desired = np.array([.35, .20])
             if not args.smoke:
+                section_started = time.monotonic()
+                # A full articulation read can synchronize device state. Both
+                # controllers use the same fresh snapshot rather than each
+                # triggering a separate read of the identical ten joints.
+                before_step = robot.get_joint_positions()
+                profile_section("joint_read_before", section_started)
+                sample_now = time.monotonic()
+                sample_wall = node.get_clock().now().nanoseconds*1e-9 if node else time.time()
                 desired = np.asarray(setpoints.sample(
-                    robot.get_joint_positions()[indices], time.monotonic(),
-                    node.get_clock().now().nanoseconds*1e-9 if node else time.time()))
-            robot.apply_action(ArticulationAction(joint_positions=desired, joint_indices=indices))
-            render_this_step = completed % 4 == 0
+                    before_step[indices], sample_now, sample_wall))
+                head_desired = np.asarray(head_setpoints.sample(
+                    before_step[head_indices], sample_now, sample_wall))
+            # Apply one indexed action so a neck update cannot replace the arm
+            # controller's targets. Neither live path teleports joint positions.
+            section_started = time.monotonic()
+            robot.apply_action(ArticulationAction(joint_positions=np.concatenate((desired, head_desired)),
+                                                  joint_indices=upper_body_indices))
+            profile_section("apply_control", section_started)
             if render_this_step and head_stereo:
                 head_stereo.prepare_render(time.monotonic())
+            step_started = time.monotonic()
             world.step(render=render_this_step)
+            timing.completed(step_started, time.monotonic(), render_this_step)
+            profile_section("step_render" if render_this_step else "step_physics", step_started)
             if render_this_step and head_stereo:
                 # Metadata only: retain each renderer reference's first observed
                 # UTC time so deferred head callbacks cannot relabel old frames.
                 head_stereo.observe_render_reference(
                     camera.get_current_frame(clone=False),
                     node.get_clock().now().nanoseconds if node else time.time_ns(),time.monotonic())
-            measured = robot.get_joint_positions()[indices]
-            if not np.all(np.isfinite(measured)):
+            section_started = time.monotonic()
+            after_step = robot.get_joint_positions()
+            profile_section("joint_read_after", section_started)
+            measured = after_step[indices]
+            head_measured = after_step[head_indices]
+            if not np.all(np.isfinite(measured)) or not np.all(np.isfinite(head_measured)):
                 raise RuntimeError("Nonfinite simulated state")
             if first is None:
                 first = measured.copy()
-            position, quaternion = terminal.get_world_pose()
-            tip = position + quat_to_rot_matrix(quaternion) @ np.array(args.tool_offset)
             if node and completed % 2 == 0:
+                section_started = time.monotonic()
+                position, quaternion = terminal.get_world_pose()
+                tip = position + quat_to_rot_matrix(quaternion) @ tool_offset
+                profile_section("terminal_pose", section_started)
                 stamp = node.get_clock().now().to_msg()
                 state = JointState()
                 state.header.frame_id, state.header.stamp = "base_link", stamp
                 state.name = list(limits)
                 actual = dict(zip(BOTH_ARM_JOINTS, measured))
+                actual.update(zip(HEAD_JOINTS, head_measured))
                 state.position = [float(actual.get(name, 0.0)) for name in state.name]
                 state_pub.publish(state)
                 publish_pose(ee_pub, tip, quaternion, stamp)
+            if node and time.monotonic() >= next_head_status:
+                next_head_status = time.monotonic()+.1
+                head_status = head_setpoints.status(
+                    head_measured, time.monotonic(), node.get_clock().now().nanoseconds*1e-9)
+                if args.smoke:
+                    head_status.update(active=False, reason="simulation_smoke", limited=False,
+                                       targets=head_desired.tolist())
+                head_status_pub.publish(String(data=json.dumps(head_status, allow_nan=False)))
+            if time.monotonic() >= next_timing_diagnostic:
+                next_timing_diagnostic = time.monotonic()+5.
+                timing_status = timing.diagnostic(time.monotonic(), float(world.current_time))
+                timing_status.update(mode="legacy" if args.smoke or args.legacy_loop_timing else "wall_time_catchup",
+                                     head_command_age_s=head_setpoints.command_age(time.monotonic(),
+                                         node.get_clock().now().nanoseconds*1e-9 if node else time.time()),
+                                     head_source_to_receipt_s=head_setpoints.source_to_receipt_s,
+                                     sections={name:dict(calls=count, total_ms=total*1000.,
+                                                        mean_ms=total/count*1000., max_ms=maximum*1000.)
+                                               for name,(total,count,maximum) in profile_sections.items()})
+                print("DEICTIC_K1_TIMING "+json.dumps(timing_status, allow_nan=False), flush=True)
+                profile_sections.clear()
             # Inspect only after existing render calls, retaining the exact
             # same-frame/pose guards. The cap uses wall time, never simulated
             # time or a loop-counter assumption about physics substeps.
+            camera_processing_started = time.monotonic()
             if render_this_step and time.monotonic() >= next_camera_publication:
                 wrist_frame = snapshot(camera)
                 head_frame = snapshot(headset,require_depth=True) if headset else None
@@ -419,11 +517,19 @@ def main():
                                 publish_pose(head_pose_pub, head_pos+np.array([1.2,0.,.9]),head_quat,stamp,"headset_world")
             if render_this_step and head_stereo:
                 head_stereo.finish_render(time.monotonic())
+            if render_this_step:
+                profile_section("camera_processing", camera_processing_started)
             completed += 1
-            if not args.smoke:
+            if args.legacy_loop_timing and not args.smoke:
                 time.sleep(max(0., 1/120-(time.monotonic()-begin)))
+        position, quaternion = terminal.get_world_pose()
+        tip = position + quat_to_rot_matrix(quaternion) @ tool_offset
         summary = {"steps": completed, "joint_names": list(BOTH_ARM_JOINTS), "initial": first.tolist(),
                    "measured": measured.tolist(), "desired": desired.tolist(), "rendered_frames": frame_count,
+                   "head_joint_names": list(HEAD_JOINTS), "head_measured": head_measured.tolist(),
+                   "head_desired": head_desired.tolist(),
+                   "head_max_tracking_error_rad": float(np.max(np.abs(head_measured-head_desired))),
+                   "timing": timing.diagnostic(time.monotonic(), float(world.current_time)),
                    "tip_position_base": tip.tolist(), "camera_position_base": cam_pos.tolist() if frame_count else None,
                    "max_tracking_error_rad": float(np.max(np.abs(measured-desired)))}
         if rendered is not None:
@@ -435,10 +541,13 @@ def main():
         (args.output/"last_run.json").write_text(json.dumps(summary, indent=2))
         print("DEICTIC_K1_RESULT " + json.dumps(summary), flush=True)
         if args.smoke and (completed < 120 or summary["max_tracking_error_rad"] > .06 or frame_count == 0
+                           or summary["head_max_tracking_error_rad"] > .06 or np.linalg.norm(head_measured) < .1
                            or np.linalg.norm(measured[:4]-first[:4]) < .05
                            or np.linalg.norm(measured[4:]-first[4:]) < .1 or summary.get("image_std",0) < 1):
             raise RuntimeError("K1 smoke test failed: inspect last_run.json")
     finally:
+        if executor:
+            executor.shutdown()
         if node:
             node.destroy_node()
             rclpy.shutdown()

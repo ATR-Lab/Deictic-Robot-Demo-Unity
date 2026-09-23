@@ -124,6 +124,93 @@ class TeleopWireContractTests(unittest.TestCase):
         self.assertIsNone(self.node.teleop_guard())
         self.assertIsNone(self.relay.owner)
 
+    def test_repeated_release_and_timeout_recovery_keep_reclutch_available(self):
+        from scipy.spatial.transform import Rotation
+        from sensor_msgs.msg import JointState
+        from std_msgs.msg import String
+        from deictic_control.node import duration_msg
+
+        self.node.status_pub = Recorder()
+        delivered = 0
+        sequence = 0
+        targets = np.array([model.fk(q) for model, q in zip(
+            self.node.teleop.models, np.array(self.current).reshape(2, 4))])
+        targets[:, 0, 3] += .01
+        positions, rotations = self.node.teleop.mapping.controller_poses(targets)
+        quaternions = Rotation.from_matrix(rotations).as_quat()
+
+        def advance(seconds):
+            self.clock[0] += seconds
+            state = JointState(name=list(BOTH_ARM_JOINTS), position=self.current)
+            duration_msg(self.clock[0], state.header.stamp)
+            self.node.on_joints(state)
+            self.relay.feedback(BOTH_ARM_JOINTS, self.current, self.node.monotonic())
+            self.deliver_ack(self.node.monotonic())
+
+        def send(held):
+            nonlocal sequence
+            message = dict(schema_version=3, session_id='reclutch_client', sequence=sequence,
+                           stamp=self.clock[0], frame_id='teleop_body', clutch=held,
+                           left_tracked=True, right_tracked=True,
+                           left_position=positions[0].tolist(), right_position=positions[1].tolist(),
+                           left_rotation=quaternions[0].tolist(), right_rotation=quaternions[1].tolist())
+            sequence += 1
+            self.node.on_teleop(String(data=json.dumps(message)))
+
+        def forward_commands():
+            nonlocal delivered
+            for message in self.node.teleop_pub.messages[delivered:]:
+                self.relay.teleop(json.loads(message.data), self.node.monotonic(), self.clock[0])
+            delivered = len(self.node.teleop_pub.messages)
+
+        # Use the actual controller output and RelayControl acknowledgement in
+        # both directions, including delayed active acknowledgements at release.
+        advance(.01)
+        forward_commands()
+        for cycle, stop in enumerate(('release', 'release', 'timeout', 'release', 'timeout', 'release')):
+            with self.subTest(cycle=cycle, stop=stop):
+                advance(.01)
+                send(False)
+                self.assertTrue(json.loads(self.node.status_pub.messages[-1].data)['teleop_ready'])
+                advance(.01)
+                send(True)
+                self.assertTrue(self.node.teleop.active, self.node.teleop.reason)
+                forward_commands()
+                self.assertTrue(self.relay.status(self.node.monotonic(), self.clock[0], True)['active'])
+                # Remain active beyond the acquisition acknowledgement grace.
+                for _ in range(6):
+                    advance(.05)
+                    send(True)
+                    self.node.teleop_tick()
+                    self.assertTrue(self.node.teleop.active, self.node.teleop.reason)
+                    forward_commands()
+                    self.current = self.relay.sample(self.node.monotonic(), self.clock[0])
+                if stop == 'release':
+                    advance(.01)
+                    send(False)
+                    self.assertTrue(json.loads(self.node.status_pub.messages[-1].data)['teleop_ready'])
+                else:
+                    advance(.31)  # Fresh feedback; input/relay command lease expires.
+                    self.node.teleop_tick()
+                    self.assertFalse(self.node.teleop.armed)
+                self.assertFalse(self.node.teleop.active)
+                forward_commands()
+                self.assertIsNone(self.relay.owner)
+                advance(.01)
+                if stop == 'timeout':
+                    send(True)
+                    self.assertFalse(self.node.teleop.active, 'Held input must not recover a fault')
+                send(False)
+                self.assertTrue(json.loads(self.node.status_pub.messages[-1].data)['teleop_ready'])
+                # A normal released heartbeat keeps readiness available through
+                # an idle interval, rather than requiring a process restart.
+                for _ in range(6):
+                    advance(.1)
+                    send(False)
+                    self.node.teleop_tick()
+                    self.node.publish_status()
+                    self.assertTrue(json.loads(self.node.status_pub.messages[-1].data)['teleop_ready'])
+
 
 if __name__ == '__main__':
     unittest.main()

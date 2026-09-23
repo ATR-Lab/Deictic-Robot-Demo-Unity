@@ -1,6 +1,6 @@
 {
   "name": "Deictic.Runtime",
   "rootNamespace": "Deictic",
-  "references": ["Unity.Robotics.ROSTCPConnector", "Unity.Robotics.ROSTCPConnector.Messages", "Unity.Robotics.ROSTCPConnector.MessageGeneration", "Unity.InputSystem", "Oculus.VR", "meta.xr.mrutilitykit", "Unity.Collections", "UnityEngine.UI"],
+  "references": ["Unity.Robotics.ROSTCPConnector", "Unity.Robotics.ROSTCPConnector.Messages", "Unity.Robotics.ROSTCPConnector.MessageGeneration", "Unity.InputSystem", "Oculus.VR", "meta.xr.mrutilitykit", "Unity.Collections", "UnityEngine.UI", "Unity.RenderPipelines.Universal.Runtime"],
   "autoReferenced": true
 }

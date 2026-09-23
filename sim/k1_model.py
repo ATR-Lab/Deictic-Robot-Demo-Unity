@@ -14,6 +14,8 @@ LEFT_ARM_JOINTS = (
     "left_elbow_pitch_joint", "left_elbow_yaw_joint",
 )
 BOTH_ARM_JOINTS = LEFT_ARM_JOINTS + ARM_JOINTS
+HEAD_JOINTS = ("aahead_yaw_joint", "aahead_pitch_joint")
+UPPER_BODY_JOINTS = BOTH_ARM_JOINTS + HEAD_JOINTS
 TOOL_OFFSET = (0.0, -0.10, 0.0)
 
 
@@ -49,10 +51,10 @@ def merge_arm_positions(names, positions, current, limits=None):
 
 
 def fixed_arm_urdf(destination, source=URDF):
-    """Derive an import-only model: both four-joint arms move; trunk/legs/head stay fixed."""
+    """Derive an import-only model: arms and two-joint neck move; trunk/legs stay fixed."""
     tree = ET.parse(source)
     for joint in tree.getroot().findall("joint"):
-        if joint.attrib["name"] not in BOTH_ARM_JOINTS:
+        if joint.attrib["name"] not in UPPER_BODY_JOINTS:
             joint.set("type", "fixed")
     for mesh in tree.getroot().iter("mesh"):
         mesh.set("filename", str((Path(source).parent / mesh.attrib["filename"]).resolve()))

@@ -25,7 +25,7 @@ namespace Deictic
             if (settings.bimanualTeleop)
             {
                 var teleop = gameObject.AddComponent<BimanualTeleop>();
-                teleop.bridge = bridge; teleop.head = head;
+                teleop.bridge = bridge; teleop.head = head; teleop.bodyFrame = rig ? rig.trackingSpace : null;
                 teleop.leftController = rig ? rig.leftControllerAnchor : null;
                 teleop.rightController = rig ? rig.rightControllerAnchor : null;
                 input.teleop = teleop;
@@ -33,6 +33,11 @@ namespace Deictic
             cameraView = gameObject.AddComponent<DeicticCameraView>();
             cameraView.Initialize(head, bridge);
             input.cameraView = cameraView;
+            var headTracking = gameObject.AddComponent<RobotHeadTracking>();
+            headTracking.bridge = bridge; headTracking.head = head;
+            headTracking.bodyFrame = rig ? rig.trackingSpace : null;
+            headTracking.cameraView = cameraView;
+            input.robotHead = headTracking;
             if (settings.syntheticScene) BuildWorkcell();
             if (settings.syntheticScene && !FindFirstObjectByType<Light>())
             {
@@ -50,6 +55,7 @@ namespace Deictic
                 }
             }
             var label = new GameObject("Deictic status");
+            label.layer = DeicticCameraView.RobotUiLayer;
             label.transform.SetParent(head, false);
             label.transform.localPosition = new Vector3(-.41f, .27f, .75f);
             hud = label.AddComponent<TextMesh>();

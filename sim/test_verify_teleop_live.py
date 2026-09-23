@@ -4,12 +4,34 @@ import pytest
 from verify_teleop_live import (ArmModel, URDF, REST, OFFSETS, INWARD_OFFSETS, tool_positions,
                                 movement_metrics, hold_metrics, preflight_motion, graph_ready,
                                 check_start_pose, timeout_release_metrics, orientation_metrics,
-                                preflight_orientation, ORIENTATION_ANGLE, wait_for_fresh_feedback)
+                                preflight_orientation, ORIENTATION_ANGLE, wait_for_fresh_feedback,
+                                mapping_from_status, absolute_controller_fields)
+from deictic_control.teleop import AnatomicalArmMapping, chain_reach
 from scipy.spatial.transform import Rotation
 
 
 def models():
     return (ArmModel(URDF, tip='left_elbow_yaw_link', tool_offset=[0., .1, 0.]), ArmModel(URDF))
+
+
+def test_absolute_fixture_uses_declared_calibration_and_no_relative_clutch_anchor():
+    model = models()
+    mapping = AnatomicalArmMapping(model, chain_reach(model[0])/.60)
+    status = dict(teleop_protocol_version=3, teleop_translation_scale=mapping.scale,
+                  teleop_human_shoulders=mapping.human_shoulders.tolist(),
+                  teleop_robot_shoulders=mapping.robot_shoulders.tolist(), teleop_tool_yaw_degrees=[-90., 90.])
+    checked = mapping_from_status(model, status)
+    reference = np.array([m.fk(q) for m, q in zip(model, REST)])
+    fields = absolute_controller_fields(checked, reference, OFFSETS)
+    rotations = Rotation.from_quat([fields['left_rotation'], fields['right_rotation']]).as_matrix()
+    actual = checked.targets(np.array([fields['left_position'], fields['right_position']]), rotations)
+    np.testing.assert_allclose(actual[:, :3, 3], reference[:, :3, 3]+OFFSETS)
+    np.testing.assert_allclose(actual[:, :3, :3], reference[:, :3, :3], atol=1e-12)
+    for old in (1, 2):
+        with pytest.raises(ValueError, match='protocol version 3'):
+            mapping_from_status(model, dict(status, teleop_protocol_version=old))
+    with pytest.raises(ValueError): mapping_from_status(model, dict(status, teleop_human_shoulders=None))
+    with pytest.raises(ValueError): mapping_from_status(model, dict(status, teleop_robot_shoulders=[[0,0,0]]*2))
 
 
 def test_no_motion_has_zero_progress_and_full_requested_error():

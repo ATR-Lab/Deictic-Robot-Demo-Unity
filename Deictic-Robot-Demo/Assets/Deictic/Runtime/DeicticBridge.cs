@@ -56,11 +56,14 @@ namespace Deictic
         public event Action PreviewCleared;
         public event Action TeleopStopRequested;
         public bool TeleopControlsBusy { get; private set; }
-        public const int TeleopProtocolVersion = 2;
+        public const int TeleopProtocolVersion = 3;
         public bool TeleopProtocolCompatible => Status != null && Status.teleop_protocol_version == TeleopProtocolVersion;
         public string LastTeleopFault { get; private set; }
         readonly string teleopSession = Guid.NewGuid().ToString("N");
         int teleopSequence;
+        int headSequence;
+        public string HeadCommandSessionId => teleopSession;
+        public int LastHeadCommandSequence => headSequence;
         float statusTime = float.NegativeInfinity;
         double sourceStamp = double.NegativeInfinity;
         int previewEpoch = -1;
@@ -81,6 +84,8 @@ namespace Deictic
             TeleopProtocolCompatible && Status.teleop_ready && Status.teleop_relay_ready &&
             Time.realtimeSinceStartup - statusTime < settings.statusTimeout &&
             Ros != null && Ros.HasConnectionThread && !Ros.HasConnectionError;
+        public bool CanTrackRobotHead => clockSynchronized && Time.realtimeSinceStartup - lastClockReply < 15 &&
+            Ros != null && Ros.HasConnectionThread && !Ros.HasConnectionError;
 
         public void Initialize(DeicticSettings config)
         {
@@ -96,6 +101,7 @@ namespace Deictic
             Ros.RegisterPublisher<StringMsg>("/deictic/execute_request");
             Ros.RegisterPublisher<StringMsg>("/deictic/registration_failure");
             Ros.RegisterPublisher<StringMsg>("/deictic/teleop/input", queue_size: 1, latch: false);
+            Ros.RegisterPublisher<StringMsg>("/k1/head/command", queue_size: 1, latch: false);
             Ros.RegisterPublisher<Float64Msg>("/deictic/time_sync/request");
             Ros.Subscribe<Float64MultiArrayMsg>("/deictic/time_sync/reply", OnClockReply);
             Ros.Subscribe<StringMsg>("/deictic/status", OnStatus);
@@ -279,7 +285,7 @@ namespace Deictic
             public string session_id;
             public int sequence;
             public double stamp;
-            public string frame_id = "teleop_head";
+            public string frame_id = "teleop_body";
             public bool clutch, left_tracked, right_tracked;
             public double[] left_position, right_position;
             public double[] left_rotation, right_rotation;
@@ -308,6 +314,27 @@ namespace Deictic
                 clutch = clutch, left_tracked = leftTracked, right_tracked = rightTracked,
                 left_position = TeleopPosition(left), right_position = TeleopPosition(right),
                 left_rotation = TeleopRotation(leftRotation), right_rotation = TeleopRotation(rightRotation)
+            })));
+            return true;
+        }
+        [Serializable]
+        public sealed class RobotHeadCommand
+        {
+            public int schema_version = 1;
+            public string session_id;
+            public int sequence;
+            public double stamp;
+            public string frame_id = "base_link";
+            public bool active, tracked;
+            public double[] orientation;
+        }
+        public bool PublishRobotHead(bool active, bool tracked, Quaternion bodyRelativeRotation)
+        {
+            if (Ros == null || !Ros.HasConnectionThread || Ros.HasConnectionError || (active && !CanTrackRobotHead)) return false;
+            Ros.Publish("/k1/head/command", new StringMsg(JsonUtility.ToJson(new RobotHeadCommand
+            {
+                session_id = teleopSession, sequence = ++headSequence, stamp = RosFrames.Now,
+                active = active, tracked = tracked, orientation = TeleopRotation(bodyRelativeRotation)
             })));
             return true;
         }

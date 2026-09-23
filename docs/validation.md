@@ -4,6 +4,236 @@ This is a simulation-first engineering reproduction of the paper's architecture.
 
 Results are dated and preserve unsuccessful trials as well as later corrections. The named `output/` and `sim/artifacts/` files were retained in the development workspace; generated logs, images, APKs and test reports are excluded from the source repository. A fresh clone contains the test and capture tools, not those historical artifacts. Start with [the current setup](setup.md) and [teleoperation validation commands](arm-teleoperation.md#validation) to produce new reports.
 
+## Head latency and repeated trigger acquisition — 2026-09-23
+
+The input state machine now stops and rearms on the first valid sample with both
+triggers fully released. Previously, releasing both during active control entered
+the interruption state after the release check, discarding that sample; the
+September 22 test's extra release frame masked this edge case. Analog index
+triggers now use separate squeeze/release thresholds (0.5/0.1) so threshold noise
+does not become an accidental stop. A partial left squeeze, active arm control,
+and its release frame suppress UI hover/click handling. Interrupted tracking or
+readiness still requires a fresh, fully released sample before reacquisition.
+
+Head commands target 50 Hz independently of 20 Hz arm commands. The stereo source
+uses 320×240 per eye and remains warm while requested, with a 15 Hz publication
+cap. The relay sends one JPEG80 containing both eyes and the original acquisition
+stamp. Unity decodes the newest pending image each update. The endpoint replaces
+only unsent display images; other messages retain FIFO order. `TCP_NODELAY`
+prevents the Unity socket from batching small pose messages. Fixed-step physics
+uses observed simulation time with bounded catch-up and a wall-time render turn
+to prevent either a stalled renderer or persistent physics lag from starving
+the other. Joint limits, drives and command freshness gates are unchanged.
+
+The isolated Unity project passed **96/96 project EditMode checks**
+(`output/latency-editmode.xml`), including repeated rapid trigger cycles, release
+orders, analog noise, UI cancellation, head cadence, bounded JPEG parsing and
+GPU eye order/orientation. That initial unfiltered invocation also selected
+vendor package build tests: two unrelated standalone build tests failed and
+four platform build tests skipped; no Deictic test failed. Offline PlayMode
+passed **7/7 selected non-live checks**, with the deliberately unconfigured live
+camera test skipped (`output/latency-playmode-offline.xml`).
+
+Native Jazzy/Python 3.12 passed **278/278 controller/simulator checks**
+(`output/latency/native-tests.xml`). The subsequent render-fairness adjustment
+passed **10/10 focused timing checks** (`output/latency/final-timing-tests.xml`),
+overlapping eight checks in the earlier selection. Launcher preflight passed
+**9/9** checks and now requires the stereo and timing modules in the installed
+workstation copy.
+
+The same fixed-base Isaac scene, full-resolution registration inputs, learned
+registration process and WebRTC-enabled configuration were used for before/after
+measurements. `sim/benchmark_head_latency.py` issued six four-second head poses;
+all six converged in both runs and the final inactive command was acknowledged.
+Reports are `output/latency/baseline.json` and `optimized.json`:
+
+| Measurement | Previous deployment | Current revision |
+|---|---:|---:|
+| Stereo images received locally on the workstation | 1.48 Hz | 9.33 Hz |
+| Preserved source-stamp to ROS receipt, median / p95 | 299 / 399 ms | 41 / 46 ms |
+| First measured movement, median of the same five non-initial steps | 269 ms | 158 ms |
+| 90% target band, median of the same four qualifying steps | 405 ms | 528 ms |
+| Mean display payload for this scene | 1,036,800 bytes | 5,194 bytes |
+
+The current display is 320×240 per eye, compared with the previous relay's
+480×360 per eye. Compression size depends on image content. These are single
+short simulator trials, not physical sensor-to-eye measurements. Head status
+arrives at approximately 10 Hz, limiting timing precision; the initial neutral
+step is excluded from movement comparison because its starting error differs
+between runs. A small gravity offset can pass the 0.035-rad convergence tolerance
+without entering the narrower 90% band. The full reports retain those null
+crossings and the slower initial neutral movement in the current trial.
+
+The first catch-up experiment (`updated.json`) achieved 59 ms median initial
+movement but only 3.01 camera frames/s. Giving rendering a bounded wall-time turn
+increased video delivery to about 9 Hz, with a tradeoff in full neck settling
+time. `final.json` records that intermediate revision before duplicate joint
+reads were consolidated. The last profiling pass attributed roughly 55 ms per
+render and 19 ms per rendered camera-processing pass in the measured interval;
+joint reads averaged below 0.1 ms. Rendering and physics remain a workstation
+limit. No faster physical-neck or headset-comfort claim is made.
+
+All **4/4 live Unity–SSH–ROS–Isaac checks passed** with the native Meta XR
+Simulator 205 display in the separate validation project
+(`output/latency-optimized-native.xml`):
+
+- Scripted controller poses moved each arm independently and completed three
+  acquisitions with actual relay acknowledgements. Compressed Robot POV stayed
+  active throughout: 388 new images, maximum displayed age 0.341 s.
+- The sustained camera test displayed 88 new images in ten seconds, maximum age
+  0.379 s, with zero stale samples, then released its subscription on toggle.
+- Scripted head rotations moved measured neck joints and produced changed
+  stereo images, with explicit `head_view_inactive` acknowledgement on return
+  to User view.
+- Actual native `OVRPlugin`/`OVRCameraRig` head samples traversed the production
+  input dispatch and correlated with ROS commands and measured neck feedback.
+  The native head pose was stationary; changing angles and controller trigger
+  states remain scripted in these tests.
+
+The preceding intermediate native runs also passed (one arm check in
+`latency-bimanual-native.xml`, then four integration checks in
+`latency-final-native.xml`). No physical headset or robot was tested. Native
+two-trigger delivery still needs a manual check. The user's main Unity editor
+and Play mode were untouched; task-owned validation services were stopped.
+Matching source changes were deployed to the installed workstation repository.
+The existing Android APK predates these changes and is not current.
+
+## Head tracking and absolute arm acquisition, protocol v3 — 2026-09-22
+
+Robot POV now controls the two simulated neck joints from the headset's current
+orientation relative to the stable tracking-space heading. The stereo cameras
+move with that head. K1 has yaw/pitch joints, not roll or head translation;
+the URDF limits remain enforced. Both-trigger arm acquisition now maps the
+current hand poses through human/robot shoulder offsets immediately, then
+approaches the resulting IK targets under the existing servo limits. Head gaze
+does not rotate the arm-control frame. See [the mapping](arm-teleoperation.md).
+
+The separate Unity validation project passed **72 unique EditMode checks**
+across `output/head-arm-v3-editmode.xml` (71/72) and the focused corrected
+`output/head-arm-v3-editmode-r2.xml` (1/1). The initial failure was a test that
+repressed a trigger without a second fully released sample after interruption;
+the test now observes the existing full-release latch. The runtime guard was
+not relaxed.
+
+Native Ubuntu Jazzy/Python 3.12 passed **227/227 controller and simulator checks**
+(`output/head-arm-v3/native-tests.xml`). After the final neck-hold and natural
+initial hand-pose regressions, **47/47 focused checks** passed
+(`output/head-arm-v3/native-finalfix.xml`); these overlap the full selection.
+The additional endpoint compatibility checks passed **3/3**, including an actual
+TCP/ROS subscribe, duplicate removal, unrelated traffic and resubscribe on one
+connection (`output/head-arm-v3/endpoint-compat.xml`). The launcher passed its
+**9/9 isolated tests** and Windows PowerShell 5 dry run.
+
+The live Isaac head verifier passed three absolute yaw/pitch poses, measured
+convergence, matching stereo image timestamps, changed images from both head
+cameras, and inactive/tracking-loss/watchdog holds
+(`output/head-arm-v3/head-validation-r3.json`). Its final maximum measured
+error across the declared poses was below 0.009 rad. The original output
+directory was not writable by the host user; the verifier now checks artifact
+access before commanding motion. A subsequent run exposed repeated idle packets
+rebasing the held neck target onto gravity sag. The controller now captures a
+hold only on transition, with two regressions covering repeated idle packets.
+
+With a real **Meta XR Simulator 205 OpenXR display** running in the separate
+Unity project, both live Unity/ROS/Isaac tests passed:
+
+- `output/head-arm-v3-native-head-r2.xml`: scripted orientations traversed the
+  production sampling and TCP bridge, moved the measured neck, updated fresh
+  stereo images on a stereo-enabled camera, and released the head lease on
+  return to User view. The first run exposed the pinned ROS2v0.7.0 endpoint's
+  missing `__remove_subscriber` command, which disconnected the shared socket.
+  The tracked `ros2/scripts/run_endpoint.py` supplies only that missing command;
+  the pinned vendor checkout is unchanged.
+- `output/head-arm-v3-native-arms.xml`: both stationary initial controller poses
+  moved the measured arms without a controller delta, looking around and common
+  rig motion preserved arm targets, each hand moved its own arm independently,
+  releasing either trigger held both arms, incomplete release prevented rearm,
+  and full release/reclutch acquired the new current poses.
+
+The final head rerun passed **2/2** in
+`output/head-arm-v3-native-head-final.xml`: the scripted head test above plus
+`NativeHeadInputRosTests`, which uses actual `OVRPlugin` tracking and
+`OVRCameraRig` anchors through the normal `DeicticInput.Update` dispatch. At the
+simulator's stationary neutral head pose, it correlated at least five native
+samples with echoed ROS commands and measured neck feedback. Both tests require
+a post-toggle `head_view_inactive` acknowledgement; watchdog expiry alone is
+insufficient. Native input evidence is in
+`output/head-arm-v3/native-head-input.json`. This checks native pose delivery;
+the changing head angles remain scripted, and native simultaneous controller
+triggers still need a manual check.
+
+The first native-input probe completed its motion assertions but the editor
+exited during loader cleanup before writing NUnit results. Disabling its owned
+rig cameras and allowing render frames/callbacks to retire before unloading
+the loader corrected the test teardown; the rerun completed normally. Its
+release assertion was then tightened after an earlier report had accepted an
+inactive watchdog status before the explicit view-toggle acknowledgement.
+No production guard was relaxed for either correction.
+
+No physical headset or robot was used. The user's main Unity editor and Play
+mode were untouched. The earlier APK below predates these head/arm changes and
+must be rebuilt before testing this revision on Android. Display delivery still
+requests at most 5 Hz and 480×360 pixels per eye; these checks are not a video
+latency or motion-comfort measurement.
+
+## Immersive robot POV — 2026-09-22
+
+Robot view now uses a camera-specific URP fullscreen pass in both PC and mobile
+renderers. The SBS head-camera feed fills each eye, with aspect-preserving center
+crop. The world-fixed return button, hover ray and status remain above it; the
+normal Unity workcell is excluded until User view is restored. Missing/stale
+frames draw an opaque waiting field instead of retaining old video. The ROS
+topics, paired-camera relay and robot command path are unchanged.
+
+In the separate Unity 6000.6.0f1 validation project, **4/4 new D3D11 GPU tests**
+passed (`output/immersive-gpu.xml`). They render a procedural fullscreen triangle
+into a two-layer stereo target and read both GPU layers, checking full viewport
+coverage, distinct left/right sources, upright ROS rows, stale-frame opacity,
+and aspect-preserving crop. The existing UI stereo GPU checks also passed
+**3/3** (`output/immersive-compile.xml`).
+
+The focused PlayMode run passed **4/4 offline checks** with **one live ROS check
+skipped** because the remote camera stack was not connected
+(`output/immersive-playmode-r2.xml`). It checks lifecycle and world-fixed return
+controls, plus actual camera rendering through each shipped renderer asset:
+full-screen corner coverage after head-pose changes, the return button above
+the feed, no transparent workcell leakage, no effect on unrelated cameras,
+opaque stale output, and restoration of User view. The first run's two render
+checks stopped on a test color-space expectation: UI green 0.2 reads back near
+0.033 in the linear target. Comparing the expected linear color corrected the
+test; no runtime change was needed. Captured fixture images are under
+`output/immersive-pov/`.
+
+A separate native **Meta XR Simulator 205 / Quest 3S** probe passed its
+90-second stereo display and return lifecycle check
+(`output/immersive-native-simulator-r2.xml`). OpenXR reported one 1440×1584
+two-layer array target with two full-eye viewports; the camera was stereo
+enabled throughout. The simulator's Left eye and Right eye views were inspected
+separately: the expected red/blue and green/yellow source halves filled their
+views, with upright rows and the return/status controls visible above them.
+The eye layout is recorded in `output/immersive-pov/simulator-eye-layout.txt`.
+The first diagnostic stopped on the simulator's unsupported optional Meta
+extension errors during loader startup. The rerun retained those logs but
+excluded startup/teardown SDK errors from the diagnostic's assertions;
+normal error checking remained enabled during the display observation. No
+production behavior was changed for this probe.
+
+The ARM64 IL2CPP development APK built successfully with Vulkan on the same
+date: `output/immersive-pov/DeicticK1-immersive.apk`, **124,646,569 bytes**.
+The build log records successful compilation of `Deictic/Robot POV Fullscreen`
+and `DEICTIC_QUEST_BUILD_SUCCEEDED`. Its SHA256 is
+`1ebb9f765a5e1ffe6f0d0a7f6cdc76dc9250c6eda72f2ef91561a30319bbbf2e`.
+The APK was not installed or run on a physical headset. The user's main Unity
+editor and Play mode were left untouched; all Unity checks used the separate
+validation project.
+
+These earlier checks used synthetic stereo fixtures and did not measure live
+camera latency. At that stage the head cameras remained fixed, at most 480×360
+pixels per eye at a requested cap of 5 Hz. Moving-head control and live stereo
+checks are recorded above; fullscreen presentation itself adds no panoramic
+coverage. Physical Quest/Android display verification remains separate from
+desktop and native simulator rendering tests.
+
 ## Bimanual pose correction, protocol v2 — 2026-09-18
 
 Review against [Unitree xr_teleoperate, pinned at 817fb00](https://github.com/unitreerobotics/xr_teleoperate/tree/817fb00c63cde15e5f24a0f8fa08e1e33ed89d3b)
@@ -269,7 +499,7 @@ workstation. Check current process identity before using those recorded IDs.
 - Supplied ROS-TCP-Connector 0.7.0-preview and URDF-Importer 0.5.2-preview embedded in the project. ROS 2 endpoint release 0.7.0.
 - Ubuntu WSL / ROS Lyrical used for local checks. Remote Ubuntu 24.04 / ROS Jazzy, Isaac Sim 5.0 container, Quadro RTX 6000 24 GB, driver 570.211.01.
 - GTSAM 4.2.2 runs in an isolated Python 3.12 / NumPy 1.26 environment. NumPy 2 is rejected by the control startup because the installed GTSAM binary was incompatible.
-- Tests and generated screenshots are under ignored `.codex/`, `output/` and `sim/artifacts/`; commands and source files are kept separately from generated evidence. No Git commit has been created by this session.
+- Tests and generated screenshots are under ignored `.codex/`, `output/` and `sim/artifacts/`; commands and source files are kept separately from generated evidence.
 
 ## Checks completed
 
@@ -299,7 +529,7 @@ workstation. Check current process identity before using those recorded IDs.
 | Meta XR Simulator | Launched from the generated Unity scene and rendered the robot/controller rays. **Meta Quest 3S** was observed active in Settings > Simulated Headset after restarting Play mode; the first-run firewall prompt no longer appeared. Manual controller-button reaching and physical Quest behavior remain unverified. |
 | Stationary MR rig in native simulator | The inherited first-person locomotor drove the rig to Y=−1046.899 m. The generated scene now disables its `Locomotor` subtree, uses FloorLevel tracking and turns off the legacy headset emulator. Native render-phase probe `xr-runtime-probe-20260916-174104-632.json`, frame 2235, records rig `(0,0,0)`, head `(0,1.7,0)`, OpenXR Floor origin, and finite in-view projections of the table, target and all toggle corners in both eyes. This validates the corrected pose/projection, not an actual toggle input. |
 | Native keyboard camera toggle | The user clicked the Unity Game view and pressed **V**, then confirmed that the robot-camera panel appeared; the assistant subsequently observed the live wrist feed and **Robot camera → User view** button in the native Unity display. This is a user-performed one-way native keyboard check. Earlier automated key attempts produced no V held/edge state in two 10-second traces despite enabled keyboard, Game focus and DynamicUpdate; no input-runtime change was made to accommodate that automation limit. A physical/native controller-pointer click and the reverse keyboard transition are not established by this check. |
-| Quest APK | The current Android ARM64 IL2CPP development build succeeded at **20:12:47 UTC**, including the clock-quality correction, exact committed-target/base-local preview feedback and the prior lifecycle, overlay shader, Android User-view passthrough, geometric preview binding and stationary-rig fixes: **`edu.kent.atr.deictick1`**, **124,631,496 bytes (124.6 MB)**. SHA256 independently verified: `e37ba9f14f39a6fe22124709c1a652e7ab86a87aad9380182686d05c14d6c085`. AAPT verified version 0.1.0, `arm64-v8a`, INTERNET and optional `com.oculus.feature.PASSTHROUGH`. No physical installation/run is claimed. |
+| Quest APK | The historical Android ARM64 IL2CPP development build succeeded at **20:12:47 UTC**, including the clock-quality correction, exact committed-target/base-local preview feedback and the prior lifecycle, overlay shader, Android User-view passthrough, geometric preview binding and stationary-rig fixes: **`edu.kent.atr.deictick1`**, **124,631,496 bytes (124.6 MB)**. SHA256 independently verified: `e37ba9f14f39a6fe22124709c1a652e7ab86a87aad9380182686d05c14d6c085`. AAPT verified version 0.1.0, `arm64-v8a`, INTERNET and optional `com.oculus.feature.PASSTHROUGH`. No physical installation/run is claimed. |
 | Static learned-registration validation | After selecting filter 0.7 on a development frame, three newly acquired frames passed unchanged gates: confidence 0.870/0.785/0.783; worst five-target errors 3.84/3.46/1.04 mm. All use one deliberately textured static simulation fixture. |
 | Live learned-registration candidates | **30/30 observations passed**, zero frontend failures over 60 s; minimum confidence 0.745568, worst independent target-mapping error **4.102 mm**, source-header-to-arrival age **2.012–2.264 s**, maximum result interval 2.100 s. Candidate outputs were isolated from the controller during this check. |
 | Fixed-world markerless → GTSAM → Isaac | **1/1 PlayMode pass** in `playmode-markerless-results.xml` at 16:48:57–16:49:06 UTC: **1.70 mm grounding error**, **2.27 mm measured tool error**, test-case duration 8.983 s, clock RTT 30.1 ms. The test asserted `markerless`/`gtsam_isam2`, selected a fixed Unity-world target independently of estimated alignment, observed real joint motion, and required fresh post-execute tool feedback. This is one reach in the declared textured simulation fixture, not a paper task-time or physical accuracy measurement. |
@@ -342,7 +572,7 @@ The latest camera-view source adds a Resources-backed `ZTest Always` UI shader s
 
 Continuous healthy optimization exposed an overly strict preview-version check. The revised binding keeps the original preview transform, base target and exact approved trajectory, permits at most 5 mm cumulative remapping of that target within the same graph epoch, and rechecks the bound before execute. It never rebases the original comparison after small updates. Origin changes, excessive displacement, backend invalidation, stale feedback/registration, plan age and exact execute-token checks still apply. Unity now follows epoch/backend invalidation rather than invalidating on every optimizer version. The 23 Unity and latest 27 controller tests pass, including rejection of runtime nonfinite tolerance changes. The updated live reach also passed after a deliberate 4.5-second review interval with continuing registration; the current APK contains this binding.
 
-MR preview feedback now stores the planned FK path in robot-base coordinates so later alignment updates reproject it together with the ghost robot. A separate collider-free marker retains the exact committed base point, rather than replacing it with the IK endpoint; a preview without a local committed point is labeled **Planned endpoint**. Empty old wire previews preserve the pending request, while cancel/execute and other preview invalidation clear the graphics and committed point. These focused changes passed the 26-test suite and remain included in the current APK; the later clock revision passed all 32 tests. Both camera-view PlayMode checks also passed again with the actual live wrist stream.
+MR preview feedback now stores the planned FK path in robot-base coordinates so later alignment updates reproject it together with the ghost robot. A separate collider-free marker retains the exact committed base point, rather than replacing it with the IK endpoint; a preview without a local committed point is labeled **Planned endpoint**. Empty old wire previews preserve the pending request, while cancel/execute and other preview invalidation clear the graphics and committed point. These focused changes passed the 26-test suite and remain included in that historical APK; the later clock revision passed all 32 tests. Both camera-view PlayMode checks also passed again with the actual live wrist stream.
 
 Native simulator inspection exposed an additional scene issue hidden by the non-XR integration test: the supplied comprehensive rig's `FirstPersonLocomotor` applies its own gravity, even though its Rigidbody is kinematic. It continuously copied the falling character-controller height to the tracking origin. `DemoSetup.ConfigureStationaryRig` now deactivates only the generated scene's `Locomotor` subtree, selects FloorLevel and disables legacy Ctrl/mouse headset emulation. The original sample scene and SDK prefabs remain unchanged. The subsequent native probe confirms stable rig/eye height and valid stereo projection. The user later confirmed the V shortcut opens Robot view; native controller-pointer activation remains unverified.
 

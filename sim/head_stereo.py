@@ -4,7 +4,8 @@ The vendor URDF supplies one optical mount, not calibrated stereo extrinsics.
 The simulated eyes straddle that origin by an adjustable 64 mm baseline and sit
 20 mm farther forward. Both cameras retain the vendor optical orientation. The
 default forward offset clears the complete pinned Head_2 mesh by 16.69 mm.
-Only this pair's render products are enabled on a display request (maximum 5 Hz).
+Both render products stay warm while requested; newest coherent pairs publish
+at up to 15 Hz by default. With no display demand, both products are disabled.
 Wrist/headset registration cameras and their render scheduling are not modified.
 """
 import json
@@ -20,7 +21,7 @@ from k1_model import URDF
 
 MOUNT_LINK = "head_booster_stereo_rgb_link"
 FORWARD_OFFSET_M = 0.020
-MAX_RATE_HZ = 5.0
+MAX_RATE_HZ = 15.0
 MAX_CAPTURE_AGE_S = 1.0
 CAPTURE_TIMEOUT_S = 2.0
 
@@ -59,12 +60,14 @@ def rigid_link_prim(stage, link_name, rigid_body_api):
     return parents[0]
 
 
-def stereo_mount(baseline_m=0.064, width=640, urdf=URDF):
+def stereo_mount(baseline_m=0.064, width=320, urdf=URDF, rate_hz=MAX_RATE_HZ):
     """Return simulated eye poses in the vendor mount's parent-link frame."""
     if not math.isfinite(baseline_m) or not 0 < baseline_m <= 0.20:
         raise ValueError("Simulation head-stereo baseline must be in (0, 0.20] metres")
     if width not in (320, 640):
         raise ValueError("Head-stereo width must be 320 or 640 pixels")
+    if not math.isfinite(rate_hz) or not 1. <= rate_hz <= 30.:
+        raise ValueError("Head-stereo publication rate must be in [1, 30] Hz")
     joints = [joint for joint in ET.parse(urdf).getroot().findall("joint")
               if joint.find("child").get("link") == MOUNT_LINK]
     if len(joints) != 1 or joints[0].get("type") != "fixed":
@@ -85,7 +88,8 @@ def stereo_mount(baseline_m=0.064, width=640, urdf=URDF):
         "baseline_m": baseline_m,
         "forward_standoff_m": FORWARD_OFFSET_M,
         "resolution": [width, width*3//4],
-        "max_rate_hz": MAX_RATE_HZ,
+        "max_rate_hz": rate_hz,
+        "render_schedule": "continuous while requested; latest coherent pair at bounded publication rate",
         "rotation_parent_from_optical": rotation.tolist(),
         "eyes": {side: {
             "position_parent": (xyz+rotation@np.array([offset, 0., FORWARD_OFFSET_M])).tolist(),
@@ -97,9 +101,11 @@ def stereo_mount(baseline_m=0.064, width=640, urdf=URDF):
 
 
 class StereoSchedule:
-    """Bound render attempts and publications; reject unmatched or reused frames."""
-    def __init__(self):
-        self.next_render = 0.0
+    """Keep demanded render products warm; bound publication without queuing frames."""
+    def __init__(self, rate_hz=MAX_RATE_HZ):
+        if not math.isfinite(rate_hz) or not 1. <= rate_hz <= 30.:
+            raise ValueError("Head-stereo publication rate must be in [1, 30] Hz")
+        self.period = 1./rate_hz
         self.next_publish = 0.0
         self.last_reference = None
         self.reference_floor = None
@@ -113,23 +119,21 @@ class StereoSchedule:
             self.pending = False
             return False
         if self.pending:
-            if now < self.deadline:
-                return True
-            self.timeouts += 1
-            self.pending = False
-            self.next_render = now+1/MAX_RATE_HZ
-            return False
-        if now < max(self.next_render, self.next_publish):
-            return False
-        self.next_render = now+1/MAX_RATE_HZ
+            if now >= self.deadline:
+                # Diagnose a stalled source without repeatedly stopping/restarting
+                # deferred camera callbacks and adding a fresh pipeline delay.
+                self.timeouts += 1
+                self.deadline = now+CAPTURE_TIMEOUT_S
+            return True
         self.pending = True
         self.deadline = now+CAPTURE_TIMEOUT_S
         self.reference_floor = reference_floor
+        self.next_publish = now
         self.requests += 1
         return True
 
     def accept(self, left, right, now):
-        if not synchronized(left, right) or now < self.next_publish:
+        if not self.pending or not synchronized(left, right) or now < self.next_publish:
             return False
         if (left.rgb.shape != right.rgb.shape or len(left.rgb.shape) != 3
                 or left.rgb.shape[2] != 3 or left.rgb.shape[0] > 480 or left.rgb.shape[1] > 640):
@@ -140,23 +144,23 @@ class StereoSchedule:
         if self.last_reference is not None and reference <= self.last_reference:
             return False
         self.last_reference = reference
-        self.next_publish = now+1/MAX_RATE_HZ
-        self.pending = False
+        self.next_publish = now+self.period
+        self.deadline = now+CAPTURE_TIMEOUT_S
         return True
 
 
 class HeadStereoDisplay:
     """Own only the head display cameras/products; imports Isaac after app startup."""
     def __init__(self, stage, output, node, configure_camera, intrinsics,
-                 baseline_m=0.064, width=640):
+                 baseline_m=0.064, width=320, rate_hz=MAX_RATE_HZ):
         import omni.replicator.core as rep
         from pxr import UsdGeom, UsdPhysics
         from isaacsim.sensors.camera import Camera
         from isaacsim.core.utils.rotations import rot_matrix_to_quat
 
-        self.spec = stereo_mount(baseline_m, width)
+        self.spec = stereo_mount(baseline_m, width, rate_hz=rate_hz)
         self.output, self.node, self.intrinsics = Path(output), node, intrinsics
-        self.schedule = StereoSchedule()
+        self.schedule = StereoSchedule(rate_hz)
         self.cameras, self.products, self.publishers = {}, {}, {}
         self.requested = False
         self.saved = False
@@ -167,6 +171,9 @@ class HeadStereoDisplay:
         self.next_diagnostic = 0.0
         self.subscriber_counts = {}
         self.last_decision = 'initializing'
+        self.last_capture_age_s = None
+        self.last_publish_wall = None
+        self.last_publish_interval_s = None
         parent = rigid_link_prim(stage, self.spec["parent_link"], UsdPhysics.RigidBodyAPI)
         orientation = rot_matrix_to_quat(np.array(self.spec["rotation_parent_from_optical"]))
         for side, eye in self.spec["eyes"].items():
@@ -189,8 +196,8 @@ class HeadStereoDisplay:
             if node:
                 from sensor_msgs.msg import Image, CameraInfo
                 self.publishers[side] = (
-                    node.create_publisher(Image, eye["image_topic"], 2),
-                    node.create_publisher(CameraInfo, eye["info_topic"], 2),
+                    node.create_publisher(Image, eye["image_topic"], 1),
+                    node.create_publisher(CameraInfo, eye["info_topic"], 1),
                 )
         self.output.mkdir(parents=True, exist_ok=True)
         (self.output/"head_stereo_configuration.json").write_text(json.dumps(self.spec, indent=2))
@@ -234,6 +241,9 @@ class HeadStereoDisplay:
                       timeouts=self.schedule.timeouts,pending=self.schedule.pending,
                       reference_floor=str(self.schedule.reference_floor),
                       reference_history=len(self.reference_times),published_pairs=self.published_pairs,
+                      capture_age_s=self.last_capture_age_s,
+                      publish_interval_s=self.last_publish_interval_s,
+                      max_publish_rate_hz=self.spec['max_rate_hz'],
                       decision=self.last_decision,
                       cameras={side:frame_diagnostic(camera,frames[side] is not None if frames else None)
                                for side,camera in self.cameras.items()})
@@ -242,7 +252,11 @@ class HeadStereoDisplay:
 
     def finish_render(self, now):
         if not self.requested:
-            self.last_decision = 'not_requested_or_backoff'
+            self.last_decision = 'not_requested'
+            self.diagnose(now)
+            return
+        if now < self.schedule.next_publish:
+            self.last_decision = 'publication_rate_gate'
             self.diagnose(now)
             return
         frames = {side: snapshot(camera) for side, camera in self.cameras.items()}
@@ -266,9 +280,9 @@ class HeadStereoDisplay:
             self.last_decision = 'reference_watermark_duplicate_or_rate_gate'
             self.diagnose(now,frames)
             return
-        self.requested = False
-        for product in self.products.values():
-            product.hydra_texture.set_updates_enabled(False)
+        self.last_capture_age_s = max(0., wall_age, now-capture_monotonic)
+        self.last_publish_interval_s = now-self.last_publish_wall if self.last_publish_wall is not None else None
+        self.last_publish_wall = now
         self.last_decision = 'accepted'
         if self.node:
             from sensor_msgs.msg import Image, CameraInfo

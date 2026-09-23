@@ -17,11 +17,10 @@ from scipy.spatial.transform import Rotation
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'ros2/src/deictic_control'))
 from deictic_control.kinematics import ArmModel, make_joint_plan
-from deictic_control.teleop import check_bimanual_geometry, pose_jacobian, PoseIK
+from deictic_control.teleop import AnatomicalArmMapping, check_bimanual_geometry, pose_jacobian, PoseIK
 from k1_model import BOTH_ARM_JOINTS, URDF
 
 REST = np.array([[0., 0., 0., 0.], [0., .5, 0., 0.]])
-CONTROLLERS = np.array([[0., .2, .1], [0., -.2, .1]])
 OFFSETS = np.array([[.020, -.003, .005], [.020, .003, .005]])
 INWARD_OFFSETS = np.array([[0., -.05, 0.], [0., .05, 0.]])
 STATUS_TRANSITION_GRACE = .50  # Observation only; production input TTL stays .25 s.
@@ -34,6 +33,37 @@ ORIENTATION_MAX_DRIFT = .01
 
 def tool_positions(models, q):
     return np.array([model.fk(arm)[:3, 3] for model, arm in zip(models, np.asarray(q).reshape(2, 4))])
+
+
+def mapping_from_status(models, status):
+    """Refuse old/unknown calibration before constructing absolute input."""
+    if status.get('teleop_protocol_version') != 3:
+        raise ValueError('This verifier requires the absolute-pose protocol version 3 controller')
+    scale = float(status.get('teleop_translation_scale', 0.))
+    shoulders = np.asarray(status.get('teleop_human_shoulders'), dtype=float)
+    robot = np.asarray(status.get('teleop_robot_shoulders'), dtype=float)
+    yaw = np.asarray(status.get('teleop_tool_yaw_degrees'), dtype=float)
+    if (not np.isfinite(scale) or not .1 <= scale <= 2. or shoulders.shape != (2, 3)
+            or not np.all(np.isfinite(shoulders)) or robot.shape != (2, 3)
+            or not np.all(np.isfinite(robot))):
+        raise ValueError('Missing or invalid declared teleoperation anatomical mapping')
+    mapping = AnatomicalArmMapping(models, scale, shoulders[0, 0], shoulders[0, 1], -shoulders[0, 2], yaw)
+    if (not np.allclose(mapping.human_shoulders, shoulders, atol=1e-10)
+            or not np.allclose(mapping.robot_shoulders, robot, atol=1e-10)):
+        raise ValueError('Declared shoulder mapping does not match the pinned robot model')
+    return mapping
+
+
+def absolute_controller_fields(mapping, reference, offsets, rotation_vectors=None):
+    """Explicitly invert a known robot fixture; never rely on clutch anchors."""
+    poses = reference.copy()
+    poses[:, :3, 3] += offsets
+    if rotation_vectors is not None:
+        poses[:, :3, :3] = Rotation.from_rotvec(rotation_vectors).as_matrix() @ reference[:, :3, :3]
+    positions, matrices = mapping.controller_poses(poses)
+    rotations = Rotation.from_matrix(matrices).as_quat()
+    return dict(left_position=positions[0].tolist(), right_position=positions[1].tolist(),
+                left_rotation=rotations[0].tolist(), right_rotation=rotations[1].tolist())
 
 
 def movement_metrics(models, initial, final, offsets):
@@ -207,7 +237,7 @@ def main():
     latest = dict(status=None, joints=None)
     session, sequence, authorized = str(uuid.uuid4()), 0, False
     last_input_stamp = None
-    translation_scale = 1.
+    mapping = reference = None
 
     def status(message):
         try:
@@ -265,12 +295,9 @@ def main():
 
     def send(held, offsets, rotation_vectors=None):
         nonlocal sequence, last_input_stamp
-        rotations = Rotation.from_rotvec(np.zeros((2, 3)) if rotation_vectors is None else rotation_vectors).as_quat()
-        value = dict(schema_version=2, session_id=session, sequence=sequence, stamp=time.time(),
-                     frame_id='teleop_head', clutch=held, left_tracked=True, right_tracked=True,
-                     left_position=(CONTROLLERS[0]+offsets[0]/translation_scale).tolist(),
-                     right_position=(CONTROLLERS[1]+offsets[1]/translation_scale).tolist(),
-                     left_rotation=rotations[0].tolist(), right_rotation=rotations[1].tolist())
+        value = dict(schema_version=3, session_id=session, sequence=sequence, stamp=time.time(),
+                     frame_id='teleop_body', clutch=held, left_tracked=True, right_tracked=True,
+                     **absolute_controller_fields(mapping, reference, offsets, rotation_vectors))
         sequence += 1
         last_input_stamp = value['stamp']
         publisher.publish(String(data=json.dumps(value, allow_nan=False)))
@@ -344,17 +371,16 @@ def main():
             raise ValueError('Resolved graph requires one simulation controller/status publisher and no competing teleop publisher')
         assert_inactive()
         state = latest['status']
-        if state.get('teleop_protocol_version') != 2:
-            raise ValueError('This verifier requires the full-pose protocol version 2 controller')
-        translation_scale = float(state.get('teleop_translation_scale', 0.))
-        if not np.isfinite(translation_scale) or not .1 <= translation_scale <= 2.:
-            raise ValueError('Missing or invalid declared teleoperation translation scale')
-        report['translation_scale'] = translation_scale
+        mapping = mapping_from_status(models, state)
+        report['translation_scale'] = mapping.scale
+        report['human_shoulders'] = mapping.human_shoulders.tolist()
+        report['tool_yaw_degrees'] = state['teleop_tool_yaw_degrees']
         if (state.get('robot_feedback') != 'external' or not state.get('execution_enabled')
                 or not state.get('headset_tracking_ready') or state.get('preview_ready')
                 or state.get('teleop_reason') in ('teleop_execution_disabled', 'teleop_mock_bimanual_unsupported')):
             raise ValueError('Controller execution/tracking/idle preconditions are not met')
         initial = np.asarray(latest['joints']['positions'])
+        reference = np.array([m.fk(q) for m, q in zip(models, initial)])
         report['initial_joints'] = initial.tolist()
         check_start_pose(initial, args.from_current)
         preflight_motion(models, initial, offsets)
@@ -367,9 +393,9 @@ def main():
         phase('fresh_release_handshake', .8, False, expect_active=False)
         if not latest['status'].get('teleop_ready'): raise ValueError('Fresh release did not arm the backend')
         assert_inactive()
-        phase('zero_motion_clutch', .6, True, expect_active=True)
+        phase('explicit_measured_pose_clutch', .6, True, expect_active=True)
         start_q = np.asarray(latest['joints']['positions'])
-        if np.max(np.abs(start_q-initial)) > .025: raise ValueError('Zero clutch unexpectedly moved the arms')
+        if np.max(np.abs(start_q-initial)) > .025: raise ValueError('Inverse-mapped measured pose unexpectedly moved the arms')
         left_only = offsets.copy(); left_only[1] = 0.
         left = phase('left_only_'+args.motion_profile, motion_duration, True, left_only, np.zeros((2, 3)), True)
         left['movement'] = movement_metrics(models, start_q, latest['joints']['positions'], left_only)
@@ -389,6 +415,7 @@ def main():
         assert_inactive(); verify_hold(release)
         if args.orientation_check:
             orientation_start = np.asarray(latest['joints']['positions'])
+            reference = np.array([m.fk(q) for m, q in zip(models, orientation_start)])
             rotation_vectors, orientation_preflight = preflight_orientation(models, orientation_start)
             report['orientation_preflight'] = orientation_preflight
             report['orientation_limits'] = dict(angle_rad=ORIENTATION_ANGLE, minimum_progress=.4,
@@ -402,7 +429,7 @@ def main():
             # Feasibility work is done while held. Renew the release handshake
             # afterward; its elapsed CPU time cannot create an active input gap.
             phase('orientation_fresh_release', .8, False, expect_active=False)
-            phase('orientation_zero_motion_clutch', .6, True, expect_active=True)
+            phase('orientation_measured_pose_clutch', .6, True, expect_active=True)
             orientation_start = np.asarray(latest['joints']['positions'])
             previous_vectors = np.zeros((2, 3))
             for side, name in enumerate(('left', 'right')):
@@ -422,7 +449,11 @@ def main():
                 previous_vectors = active_vectors
             held = phase('orientation_release_both_hold', 1.2, False, rotations=rotation_vectors, expect_active=False)
             assert_inactive(); verify_hold(held)
-        phase('timeout_zero_motion_clutch', .6, True, expect_active=True)
+        # A release does not recalibrate absolute goals. Explicitly map the
+        # measured pose for timeout/rearm hold phases to avoid returning to the
+        # earlier fixture when either orientation or position has changed.
+        reference = np.array([m.fk(q) for m, q in zip(models, latest['joints']['positions'])])
+        phase('timeout_measured_pose_clutch', .6, True, expect_active=True)
         timeout = phase('input_silence_timeout', .9, expect_active=False)
         timeout['backend_release'] = timeout_release_metrics(report['commands'], timeout['started_unix'],
                                                              timeout['last_input_stamp_at_start'])
@@ -433,7 +464,7 @@ def main():
         assert_inactive()
         phase('explicit_rearm_release', .6, False, expect_active=False)
         if not latest['status'].get('teleop_ready'): raise ValueError('Release failed to rearm after timeout')
-        phase('rearmed_zero_motion_clutch', .6, True, expect_active=True)
+        phase('rearmed_measured_pose_clutch', .6, True, expect_active=True)
         final = phase('final_both_hold', 1., False, expect_active=False)
         assert_inactive(); verify_hold(final)
         report['passed'] = True

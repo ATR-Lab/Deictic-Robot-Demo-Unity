@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
-from k1_model import ARM_JOINTS, LEFT_ARM_JOINTS, BOTH_ARM_JOINTS, URDF, Trajectory, fixed_arm_urdf, joint_limits, validate_positions, merge_arm_positions
+from k1_model import ARM_JOINTS, LEFT_ARM_JOINTS, BOTH_ARM_JOINTS, HEAD_JOINTS, UPPER_BODY_JOINTS, URDF, Trajectory, fixed_arm_urdf, joint_limits, validate_positions, merge_arm_positions
 
 
 class ModelTests(unittest.TestCase):
@@ -15,12 +15,13 @@ class ModelTests(unittest.TestCase):
             self.assertTrue(path.is_file(), path)
             self.assertGreater(path.stat().st_size, 100)
 
-    def test_only_both_arms_move_in_derived_model(self):
+    def test_only_both_arms_and_neck_move_in_derived_model(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp)/"fixed.urdf"
             fixed_arm_urdf(path)
             names = [j.attrib["name"] for j in ET.parse(path).getroot().findall("joint") if j.attrib["type"] != "fixed"]
-            self.assertEqual(names, list(BOTH_ARM_JOINTS))
+            self.assertEqual(names, list(HEAD_JOINTS + BOTH_ARM_JOINTS))
+            self.assertEqual(set(names), set(UPPER_BODY_JOINTS))
 
     def test_bimanual_mapping_and_right_only_preserves_left(self):
         values = [.1,.2,.3,.4,.1,.5,.3,.4]

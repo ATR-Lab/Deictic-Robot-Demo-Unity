@@ -65,9 +65,12 @@ def run_case(models, name, start, goal, steps, scale):
     rotation_delta = Rotation.from_matrix(targets[:, :3, :3] @ starts[:, :3, :3].transpose(0, 2, 1)).as_rotvec()
 
     def packet(sequence, stamp, clutch, fraction):
-        rotations = Rotation.from_rotvec(rotation_delta*fraction).as_quat()
-        positions = delta*fraction/scale
-        return json.dumps(dict(schema_version=2, frame_id='teleop_head', session_id='offline_independent',
+        poses = starts.copy()
+        poses[:, :3, 3] += delta*fraction
+        poses[:, :3, :3] = Rotation.from_rotvec(rotation_delta*fraction).as_matrix() @ starts[:, :3, :3]
+        positions, matrices = servo.mapping.controller_poses(poses)
+        rotations = Rotation.from_matrix(matrices).as_quat()
+        return json.dumps(dict(schema_version=3, frame_id='teleop_body', session_id='offline_independent',
                                sequence=sequence, stamp=stamp, clutch=clutch,
                                left_tracked=True, right_tracked=True,
                                left_position=positions[0].tolist(), right_position=positions[1].tolist(),

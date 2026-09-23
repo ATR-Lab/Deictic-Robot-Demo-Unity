@@ -12,6 +12,7 @@ namespace Deictic
         public Camera viewCamera;
         public DeicticCameraView cameraView;
         public BimanualTeleop teleop;
+        public RobotHeadTracking robotHead;
         public bool synthetic;
         public Vector3 Candidate { get; private set; }
         public bool HasCandidate { get; private set; }
@@ -26,6 +27,7 @@ namespace Deictic
         Quaternion trackingSpaceRotation;
         Vector3 trackingSpaceScale;
         readonly TriggerReleaseIntent triggerIntent = new TriggerReleaseIntent();
+        readonly IndexTriggerState standaloneRightTrigger = new IndexTriggerState();
         bool rightWasHeld;
 
         void Start()
@@ -35,7 +37,9 @@ namespace Deictic
             Destroy(cursor.GetComponent<Collider>());
             cursor.transform.localScale = Vector3.one * .02f;
             cursor.GetComponent<Renderer>().material = DemoVisuals.Material(new Color(.1f, .95f, .65f));
-            pointerLine = DemoVisuals.Line("Controller pointer", Color.cyan, .002f);
+            // Transparent queue draws the ray after the fullscreen robot feed.
+            pointerLine = DemoVisuals.Line("Controller pointer", new Color(0, 1, 1, .95f), .002f);
+            pointerLine.gameObject.layer = DeicticCameraView.RobotUiLayer;
             OVRCameraRig rig = head ? head.GetComponentInParent<OVRCameraRig>() : null;
             trackingSpace = rig ? rig.trackingSpace : null;
             RememberTrackingSpace();
@@ -49,8 +53,16 @@ namespace Deictic
             bool xrActive = OVRManager.instance != null && OVRManager.isHmdPresent;
             SubscribeRecenter();
             CheckTrackingOrigin();
+            if (robotHead && robotHead.isActiveAndEnabled) robotHead.Tick(xrActive);
             if (teleop && teleop.isActiveAndEnabled) teleop.Tick(xrActive);
-            bool rightHeld = teleop && teleop.isActiveAndEnabled ? teleop.RightHeld : xrActive && OVRInput.Get(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch);
+            bool rightHeld;
+            if (teleop && teleop.isActiveAndEnabled) rightHeld = teleop.RightHeld;
+            else
+            {
+                standaloneRightTrigger.Sample(xrActive ? OVRInput.Get(OVRInput.RawAxis1D.RIndexTrigger,
+                    OVRInput.Controller.RTouch) : 0, xrActive);
+                rightHeld = standaloneRightTrigger.Held;
+            }
             bool triggerPressed = rightHeld && !rightWasHeld;
             bool triggerReleased = !rightHeld && rightWasHeld;
             rightWasHeld = rightHeld;
@@ -183,6 +195,7 @@ namespace Deictic
                 Quaternion.Angle(trackingSpace.rotation, trackingSpaceRotation) <= .01f &&
                 Vector3.Distance(trackingSpace.lossyScale, trackingSpaceScale) <= .0001f)) return;
             teleop?.Interrupt("Tracking origin changed; release both triggers");
+            robotHead?.Interrupt();
             triggerIntent.Cancel();
             if (!synthetic) bridge.InvalidateTracking("Headset tracking origin changed", "origin_changed");
             RememberTrackingSpace();
@@ -190,6 +203,7 @@ namespace Deictic
         void OnRecentered()
         {
             teleop?.Interrupt("Headset recentered; release both triggers");
+            robotHead?.Interrupt();
             triggerIntent.Cancel();
             RememberTrackingSpace();
             if (synthetic) return;

@@ -1,8 +1,56 @@
-# Start the installed demo stack manually
+# Start the installed demo stack
 
 This guide uses the already-installed **native Ubuntu workstation** profile. WSL is not needed. It starts Isaac, ROS, the Windows tunnel and the WebRTC viewer; it does **not** open Unity or change Play mode. For a new installation, follow the [complete setup guide](setup.md). The account, addresses and paths below are the tested lab installation; substitute your own on another machine.
 
 Use one instance of each service. If the stack is already running, reuse it and go to the readiness checks instead of starting duplicates. Authenticate to SSH interactively; do not save passwords in scripts.
+
+## One-command Windows launcher
+
+From this repository's root in Windows PowerShell, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-Demo.ps1
+```
+
+Enter the workstation's SSH password when prompted (or use an already configured
+SSH key). The launcher opens the installed WebRTC viewer, creates the ROS SSH
+tunnel and starts the four workstation services below. It waits for Isaac's
+startup marker before starting the ROS stack. Leave this terminal open and wait
+for `DEICTIC_DEMO_RUNNING`; then enter Unity Play mode yourself. Registration
+may still be initializing; use the Unity status and the readiness checks below
+before requesting motion. In
+the WebRTC client, connect to **131.123.237.31** once Isaac is ready. Unity, Play
+mode and your selected Quest Link / Meta XR Simulator runtime are not changed.
+
+Press **Ctrl+C** in the launcher terminal to stop the services from this launch
+and close its tunnel. Close/disconnect the viewer separately. The launcher
+refuses occupied ports or a detected existing demo; it does not replace running
+services or stop other GPU jobs. Stop an earlier manual stack using its own
+terminals before switching to this launcher.
+
+Useful options:
+
+```powershell
+# Print the launch plan without starting or connecting anything.
+.\scripts\Start-Demo.ps1 -DryRun
+# Start the stack without opening the optional WebRTC application viewer.
+.\scripts\Start-Demo.ps1 -NoViewer
+# Override the installed workstation profile when needed.
+.\scripts\Start-Demo.ps1 -Remote 'user@workstation' -RemoteRepo '~/path/to/repo' -PublicIp '192.0.2.10'
+```
+
+This starts an **already installed** stack. It does not install dependencies,
+pull repository updates, download the Isaac Docker image, or change firewall
+rules. It transfers the launcher itself over the single SSH connection, so the
+installed workstation does not need a separate copy of this new launcher.
+When upgrading, deploy the matching Unity and remote project revision first,
+including `sim/head_control.py`, `sim/head_stereo.py`, `sim/loop_timing.py`,
+`ros2/scripts/camera_view_relay.py` and `ros2/scripts/run_endpoint.py`.
+The launcher checks that these installed files exist; it does not synchronize
+or prove that their contents match the Windows checkout.
+Per-service logs are retained on the workstation under
+`<repository>/.codex/demo-sessions/<timestamp>-<session>/`.
+The manual commands below remain available for debugging individual services.
 
 ## 1. Open four workstation sessions
 
@@ -48,7 +96,11 @@ bash sim/run_isaac_container.sh --synthetic-headset \
 
 Wait for `DEICTIC_K1_READY` and camera publication; startup can take several minutes. Keep the terminal open. Preserve these flags: they select the native 1280×960 headset RGB/depth, 640×480 wrist image, matte floor and fixed wrist-camera fixture used by the registration profile. The `/workspace/deictic` output path is inside the container and maps to this repository on the workstation.
 
-Both arms are available, while the base, legs and neck remain fixed. The separate head-stereo display source is enabled on demand by default; no head-view subscribers means no extra head-camera rendering. This command does not request arm motion.
+Both arms and the neck yaw/pitch joints are available; the base and legs remain fixed. Unity targets 50 Hz neck commands while Robot POV is selected, independently of the 20 Hz arm clutch publisher. Starting this command alone requests no arm or neck motion.
+
+The head-stereo source defaults to **320×240 per eye**, with a **15 Hz** publication cap. Add `--head-stereo-width 640` to the Isaac command for native 640×480 eyes; the display relay then reduces them to at most 480×360 per eye. `--head-stereo-rate 15` sets the source cap explicitly (supported range 1–30 Hz). These are configuration values, not measured delivery guarantees. The head render products stay enabled continuously while their image/CameraInfo topics have subscribers and stop when demand ends. They are not repeatedly disabled between pairs, and they do not render while idle without subscribers.
+
+Physics keeps its authored 1/120-second step. Bounded catch-up follows Isaac's observed world time, with capped accumulated lag, so a render stall does not replay an unlimited backlog of old simulation steps. See [simulation timing](../sim/README.md#robot-head-stereo-display) for the limits and measurement tool.
 
 ## 3. Terminal B — simulation trajectory/teleoperation relay
 
@@ -67,6 +119,10 @@ DEICTIC_CONTROL_PARAMS="$PWD/ros2/src/deictic_registration/config/isaac_head1280
 ```
 
 Keep `markerless` explicit: omitting it starts mock mode. This command starts three services and binds the ROS TCP endpoint to workstation `127.0.0.1:10000`. It does not start the separate trajectory relay or registration provider.
+
+The display relay publishes the paired head view as a quality-80 JPEG on `/deictic/camera_view/stereo/image_raw/compressed`, the current Unity default. Both eyes travel together with the source acquisition stamp. The raw `/deictic/camera_view/stereo/image_raw` output remains available on demand for legacy consumers. Deploy the matching Unity settings/scripts and relay together; the launcher does not update them. Unity decodes the latest received frame each update instead of waiting on a separate 5 Hz polling timer.
+
+`run_bridge.sh` starts the endpoint through the tracked `ros2/scripts/run_endpoint.py` compatibility wrapper. The pinned ROS-TCP-Endpoint ROS2v0.7.0 lacks the Connector's subscriber-removal command; without the wrapper, returning to User view can disconnect the shared ROS connection. Deploy both files and restart this terminal when upgrading. The wrapper preserves the pinned dependency and adds that missing command; do not bypass it with the upstream endpoint module.
 
 ## 5. Terminal D — learned registration
 
@@ -91,7 +147,7 @@ Stop `topic hz` with Ctrl+C. For deictic reaching, look for `mode: markerless`, 
 
 **`teleop_ready: false` before Unity sends a fresh tracked idle/release heartbeat is expected.** It does not mean the ROS connection or visual registration failed. Bimanual readiness additionally requires execution permission, fresh eight-joint feedback, a fresh `/k1/teleop/relay_status` acknowledgement, and fresh tracked controller inputs; it does not depend on learned camera alignment. These checks do not enter Unity Play mode or send motion requests.
 
-The corrected pose implementation reports `teleop_protocol_version: 2` and `teleop_translation_scale` (default approximately 0.559). Update/restart the controller and trajectory relay together, then reload the updated Unity scripts before starting Play. Old position-only Unity input is rejected explicitly. Use `.venv-control/bin/python`, which includes NumPy 1.26.4 and SciPy 1.11.4; do not start ROS nodes with Conda's Python.
+The absolute pose implementation reports `teleop_protocol_version: 3`, `teleop_translation_scale` (default approximately 0.559), and the human/robot shoulder mapping. Update/restart Unity, the controller, trajectory relay and Isaac together; earlier arm protocols are rejected. The one-command launcher transfers only itself and reuses the installed remote project. The neck acknowledges commands on `/k1/head/status` and publishes measured yaw/pitch in `/joint_states`; its fresh clock/tracking requirements are separate from visual registration. Use `.venv-control/bin/python`, which includes NumPy 1.26.4 and SciPy 1.11.4; do not start ROS nodes with Conda's Python.
 
 ## 7. Windows — SSH tunnel for ROS
 
@@ -112,7 +168,7 @@ Set-Location 'C:\Users\ATR Lab\Documents\GitHub\Deictic-Robot-Demo-Unity'
 
 The helper opens the installed client. In its connection screen, enter **131.123.237.31** and connect; signaling is **TCP 49100**, media is **UDP 47998**. Use one client per Isaac instance. After an Isaac restart, disconnect/reconnect the viewer, or use **Connection → Reload (F5)** if it retained the old session.
 
-WebRTC connects directly to the workstation; the ROS SSH tunnel does not carry its UDP media. If the network/NAT address has changed, follow the [firewall instructions](setup.md#4-configure-networking) using the current SSH-observed Windows source address. The ROS head-stereo monitor and the WebRTC application viewer are separate feeds.
+WebRTC connects directly to the workstation; the ROS SSH tunnel does not carry its UDP media. If the network/NAT address has changed, follow the [firewall instructions](setup.md#4-configure-networking) using the current SSH-observed Windows source address. The headset-filling robot POV uses a separate ROS head-stereo feed; the WebRTC application viewer shows Isaac's desktop and does not supply the headset image.
 
 Unity remains as the user left it throughout this procedure.
 

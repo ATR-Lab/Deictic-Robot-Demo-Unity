@@ -8,9 +8,10 @@ Use the explicit continuous-run command below; the older CLI defaults and mount
 profiles remain available for reproducing the archived experiments.
 
 The supplied paper studies a fixed-base SO-101 manipulator. This adaptation fixes
-K1's trunk, head, and legs. Both four-joint arms are movable for
+K1's trunk and legs. Both four-joint arms are movable for
 [bimanual controller teleoperation](../docs/arm-teleoperation.md); the original
 deictic reaching path still controls the right arm and solves position only.
+The two neck joints track headset yaw/pitch while Unity's Robot POV is selected.
 Bimanual pose IK prioritizes position with a soft orientation objective: each
 four-joint arm cannot reproduce arbitrary six-DoF tool poses. The supplied model
 has no gripper or wrist camera. The right reaching tip is
@@ -122,10 +123,10 @@ and observed registration age 0.133–0.340 s under a one-second TTL. In that in
 native-resolution run, image delivery measured about 5.6–5.9 Hz.
 
 `models/K1/` includes the official pinned 22-DoF URDF and every referenced mesh.
-The importer creates a temporary derivative with eight arm joints movable and
-the other joints fixed. `base_link` equals vendor `trunk` and Isaac world; the
+The importer creates a temporary derivative with eight arm joints and two neck joints movable,
+with the other twelve joints fixed. `base_link` equals vendor `trunk` and Isaac world; the
 floor is at Z=-0.70 m, tabletop at Z=-0.15 m. The left arm starts at `[0,0,0,0]`
-and the right at `[0,0.5,0,0]` radians. Actual measured state, not the last command, is
+and the right at `[0,0.5,0,0]` radians; neck yaw/pitch start at zero. Actual measured state, not the last command, is
 published. Position setpoints use PhysX drives, URDF limits, and a 0.5 s command
 watchdog that holds measured position. Self-collision is disabled in this first
 simulation scene; collision-free motion is not certified for hardware.
@@ -177,7 +178,9 @@ empty trajectory is rejected. A cancel should send a one-point measured hold.
 | `/k1/sim/joint_commands` | `sensor_msgs/JointState` | Internal relay setpoint |
 | `/k1/teleop/command` | `std_msgs/String` | Leased eight-joint teleoperation setpoint from the controller |
 | `/k1/teleop/relay_status` | `std_msgs/String` | Relay readiness, ownership and lease acknowledgement |
-| `/joint_states` | `sensor_msgs/JointState` | Eight measured arm joints plus 14 fixed-zero joints |
+| `/k1/head/command` | `std_msgs/String` | Schema-1 headset orientation with tracking flags, timestamps and session/sequence |
+| `/k1/head/status` | `std_msgs/String` | Accepted neck target, measured yaw/pitch, active state, limits and hold reason |
+| `/joint_states` | `sensor_msgs/JointState` | Eight measured arm joints, two measured neck joints and twelve fixed-zero joints |
 | `/k1/end_effector_pose` | `geometry_msgs/PoseStamped` | Tool tip in base_link |
 | `/k1/wrist_camera/image_raw` | `sensor_msgs/Image` | Rendered rgb8, 640×480 |
 | `/k1/wrist_camera/camera_info` | `sensor_msgs/CameraInfo` | Pinhole intrinsics |
@@ -237,20 +240,43 @@ Normal ROS launches now enable a separate robot-forward stereo display pair.
 `--no-head-stereo` disables it; `--head-stereo` explicitly enables it, including
 in an otherwise camera-only `--no-ros` smoke run. The two owned render products
 are disabled without image/CameraInfo subscribers. With demand they remain
-enabled across existing render iterations until a new coherent pair arrives,
-with a two-second acquisition timeout and bounded retry rate. They publish at
-most 5 Hz; no extra physics or application render steps are inserted. Actual
-delivered rate depends on GPU and transport load; bounded live checks are recorded
-in [the validation history](../docs/validation.md#world-controls-and-head-stereo--2026-09-17).
-The wrist RGB and synthetic-headset RGBD registration
-topics, their calibration, and their scheduling are retained.
+continuously enabled across render iterations, including between published pairs.
+A two-second acquisition timeout reports a diagnostic without cycling the render
+products off and on. The source publication cap defaults to **15 Hz**; set
+`--head-stereo-rate HZ` within 1–30 Hz to change it. Actual delivered rate depends
+on GPU and transport load; configured rates are not measured performance guarantees.
+Bounded live checks are recorded in [the validation history](../docs/validation.md).
+The wrist RGB and synthetic-headset RGBD registration topics and calibration are
+retained.
+
+Physics retains the authored 1/120-second step. `loop_timing.py` compares wall time
+with Isaac's observed `world.current_time` to catch up after rendering, rather than
+assuming a fixed number of physics steps per application update. Accumulated lag
+is capped at 0.25 seconds. A due render receives a turn at the next scheduling
+boundary after one render period (33 ms) of catch-up following the previous
+render's completion, or after 32 catch-up iterations, whichever comes first.
+This prevents persistent physics lag from starving the camera. Excess lag is
+discarded instead of replayed indefinitely. Rendering
+targets 30 Hz; this is a scheduling target, not a guaranteed render rate. Timing
+diagnostics report the observed simulation/wall-time ratio and discarded lag, plus five-second aggregate costs for joint-state reads, control updates, rendering/physics, ROS callbacks and camera processing. Arm/head control shares one articulation snapshot before and one after each step.
 
 The pair derives its orientation and parent transform from the vendor's
-`head_booster_stereo_rgb_link` fixed joint under `aahead_pitch_link`. At the fixed
+`head_booster_stereo_rgb_link` fixed joint under the movable `aahead_pitch_link`. At the
 zero head pose, optical +Z points along robot/base/world +X, optical +X along
 robot -Y, and optical +Y along robot -Z. It looks straight forward from the head;
-it does not turn toward the wrist, target, or tabletop. The nearby tabletop may
-therefore lie below this camera's field of view.
+headset yaw/pitch commands turn the neck and its attached camera pair rather than
+aiming automatically at the wrist or reaching target. The nearby tabletop may
+lie below the forward camera field of view until the head looks down.
+
+The URDF yaw range is approximately ±58° and pitch is 18° up / 45.5° down;
+roll and translation are not actuated. Head commands use `schema_version: 1`,
+`frame_id: "base_link"` and xyzw quaternions. Unity's head publisher targets 50 Hz,
+independently of the 20 Hz arm publisher. The independent command lease is
+0.30 seconds, checked against both source timestamp and receipt time. Returning
+to User view, losing tracking or expiry holds measured neck position. Invalid,
+replayed and stale commands do not renew the lease. The status topic and
+`/joint_states` expose actual neck feedback. This path does not require the
+arm clutch or learned registration. See [head controls and protocol](../docs/arm-teleoperation.md#head-control-in-robot-pov).
 
 The URDF supplies one stereo origin, not a calibrated left/right baseline or
 intrinsics. This simulation places the eyes 32 mm either side of that origin in
@@ -260,12 +286,13 @@ origins are approximately 16.7 mm in front of the complete pinned head visual
 mesh. This is an explicitly virtual mount, not a claim about Booster's physical
 stereo calibration or lens positions.
 
-Each eye defaults to native 640×480 RGB8 with simulated fx=fy=320, cx=320,
-cy=240, zero distortion and matching OpenCV calibration imageSize. Use
-`--head-stereo-width 320` for native 320×240 per-eye images with K scaled by
-one half. Matching `CameraInfo` includes the virtual right projection offset
+Each eye defaults to native **320×240** RGB8 with simulated fx=fy=160, cx=160,
+cy=120, zero distortion and matching OpenCV calibration imageSize. Use
+`--head-stereo-width 640` for native 640×480 per-eye images with fx=fy=320,
+cx=320 and cy=240. Matching `CameraInfo` includes the virtual right projection offset
 `P[0,3]=-fx*baseline`. The shared capture is accepted only when both cached eyes
-have the same renderer reference/time, newer than the acquisition request.
+have the same renderer reference/time, newer than both the start of demand and
+the last published pair.
 A bounded reference history from the continuously rendered wrist camera records
 the first observed UTC time for each renderer reference without copying pixels.
 Both images and their CameraInfo use that same positive capture timestamp;
@@ -280,17 +307,32 @@ acquisition decisions and frame metadata without printing image data.
 | `/k1/head_camera/right/image_raw` | `sensor_msgs/Image` | Right simulated head eye, RGB8 |
 | `/k1/head_camera/left/camera_info` | `sensor_msgs/CameraInfo` | Left virtual calibration, `k1_head_left_camera_optical` |
 | `/k1/head_camera/right/camera_info` | `sensor_msgs/CameraInfo` | Right virtual calibration, `k1_head_right_camera_optical` |
-| `/deictic/camera_view/stereo/image_raw` | `sensor_msgs/Image` | ROS display relay: atomic left/right halves, at most 960×360 RGB8/5 Hz |
+| `/deictic/camera_view/stereo/image_raw/compressed` | `sensor_msgs/CompressedImage` | Default Unity display: atomic JPEG-quality-80 left/right halves, normally 640×240 total |
+| `/deictic/camera_view/stereo/image_raw` | `sensor_msgs/Image` | Legacy raw display on demand: atomic RGB8 halves, at most 960×360 total |
 
 The display relay subscribes to the individual eyes only when a viewer requests
-its output. It preserves the source pair's timestamp, uses
-`k1_head_stereo_optical` for the composite, and never falls back to wrist imagery.
+either output, and encodes/publishes only the requested outputs. It requires
+equal-size, exact-stamp source pairs before joining the eyes, preserves their
+timestamp, uses `k1_head_stereo_optical` for the composite, and never falls back to
+wrist imagery. The default 320×240 eyes produce a 640×240 composite; the 640-pixel
+source option is reduced to at most 480×360 per eye (960×360 total). JPEG quality
+defaults to 80 and its payload size varies with image content. The relay checks
+for the latest pair on a 5 ms timer with a separate 30 Hz maximum output rate;
+the source's default 15 Hz cap remains the upstream limit. Unity decodes the
+latest complete received image each update instead of applying a 5 Hz poll.
+Returning to User view removes its subscription, and absent other consumers
+both relay input subscriptions and the extra head rendering stop.
+
+Deploy the same project revision to Unity and the workstation, including
+`head_stereo.py`, `loop_timing.py`, the display relay and Unity's compressed-topic
+settings. The launcher checks that required modules exist but transfers only
+its supervisor; it does not synchronize project files or verify revision hashes.
 The simulator saves `head_stereo_configuration.json` at startup, then the first
 requested coherent pair as `head_left_camera.png`, `head_right_camera.png`, and
 `head_stereo_capture.json` in its output directory.
 
 After launching the simulator and display relay, this bounded read-only check
-activates camera demand for 15 seconds, records actual received pixels, and
+activates the **legacy raw display** demand for 15 seconds, records actual received pixels, and
 sends no robot commands. Source ROS Jazzy and use the same DDS settings first:
 
 ```bash
@@ -307,6 +349,31 @@ with the relay's area interpolation. `validation.json` records counts, capture
 intervals, ages, per-eye statistics and differences; three PNGs retain the first
 complete source/relay set. This validates live delivery/content, not physical
 stereo calibration, moving-head accuracy, or registration freshness under load.
+
+For a comparable head-response measurement, stop Unity Play first and ensure no
+other head-command publisher remains. Keep the normal markerless registration
+stack running, then run this opt-in simulated-motion check from the sourced
+Ubuntu control environment:
+
+```bash
+.venv-control/bin/python sim/benchmark_head_latency.py --allow-sim-motion \
+  --label updated --camera-topic /deictic/camera_view/stereo/image_raw/compressed \
+  --output sim/artifacts/head_latency_updated.json
+```
+
+The helper checks graph identity, fresh feedback and output-file access before
+motion, then requests six four-second small head poses at 50 Hz within an overall
+45-second bound. It records first matching status, first measured movement,
+90%-of-step response, convergence/tracking error, and received camera rate,
+acquisition-header age and mean payload size. It finishes with an acknowledged
+inactive hold. Status sampling (normally 10 Hz) limits response-time precision;
+these metrics are not sensor-to-eye latency. JSON includes configuration and
+source hashes for comparison. To measure an older raw-display deployment, use
+`--label baseline --camera-topic /deictic/camera_view/stereo/image_raw` and a
+different output path. A missing 90% crossing remains null. Final convergence
+uses a separate 0.035-rad tolerance, so a small gravity offset can satisfy
+convergence without entering the narrower 90% band. Compare the same moving
+phases across runs; the initial neutral phase can already be near its goal.
 
 ## WebRTC and network
 

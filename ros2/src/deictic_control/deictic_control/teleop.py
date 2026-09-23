@@ -1,6 +1,6 @@
-"""Simulation-only relative bimanual clutch and bounded pose servo.
+"""Simulation-only absolute bimanual clutch and bounded pose servo.
 
-No visual-registration transform enters this path. Inputs use CURRENT head yaw.
+No visual-registration transform enters this path. Inputs use a stable body yaw.
 The pose/posture/continuity objective follows the approach of Unitree's
 xr_teleoperate H1_ArmIK (817fb00), adapted to K1 geometry with SciPy; no Unitree
 driver, solver implementation, or unconstrained actuator output is copied.
@@ -33,9 +33,9 @@ class ClutchInput:
         if not isinstance(payload, str) or len(payload) > 4096:
             raise ValueError('invalid_teleop_payload')
         data = json.loads(payload)
-        if not isinstance(data, dict) or type(data.get('schema_version')) is not int or data['schema_version'] != 2:
+        if not isinstance(data, dict) or type(data.get('schema_version')) is not int or data['schema_version'] != 3:
             raise ValueError('protocol_version_mismatch')
-        if data.get('frame_id') != 'teleop_head':
+        if data.get('frame_id') != 'teleop_body':
             raise ValueError('invalid_teleop_frame')
         session, sequence = data.get('session_id'), data.get('sequence')
         if (not isinstance(session, str) or re.fullmatch(r'[A-Za-z0-9_-]{1,128}', session) is None
@@ -89,6 +89,64 @@ def chain_reach(model):
         if joint.movable:
             after_shoulder = True
     return length
+
+
+class AnatomicalArmMapping:
+    """Match shoulder-to-controller vectors to K1 shoulder-to-tool vectors.
+
+    Positions are relative to the headset in a fixed horizontal body frame.
+    Human shoulders are estimates, not inferred from gaze or clutch posture.
+    The URDF supplies robot shoulder pivots and maximum arm reach. Fixed local
+    yaw offsets align the controller's forward X with each tool's +/-Y axis.
+    """
+    def __init__(self, models, scale=1., shoulder_forward=-.05,
+                 shoulder_half_width=.18, shoulder_down=.20,
+                 tool_yaw_degrees=(-90., 90.)):
+        dimensions = (scale, shoulder_forward, shoulder_half_width, shoulder_down)
+        yaw = np.asarray(tool_yaw_degrees, dtype=float)
+        if (not all(math.isfinite(v) for v in dimensions) or not 0 < scale <= 2
+                or not -.3 <= shoulder_forward <= .3 or not .05 <= shoulder_half_width <= .4
+                or not .05 <= shoulder_down <= .5 or yaw.shape != (2,)
+                or not np.all(np.isfinite(yaw))):
+            raise ValueError('invalid_teleop_anatomical_mapping')
+        if len(models) != 2:
+            raise ValueError('teleop_requires_two_arm_models')
+        self.scale = scale
+        self.human_shoulders = np.array([[shoulder_forward, shoulder_half_width, -shoulder_down],
+                                         [shoulder_forward, -shoulder_half_width, -shoulder_down]])
+        shoulders = []
+        for model in models:
+            transform = np.eye(4)
+            for joint in model.joints:
+                transform = transform @ joint.origin
+                if joint.movable:
+                    shoulders.append(transform[:3, 3].copy())
+                    break
+            else:
+                raise ValueError('teleop_arm_missing_shoulder')
+        self.robot_shoulders = np.array(shoulders)
+        self.reach = np.array([chain_reach(model) for model in models])
+        self.tool_yaw_degrees = yaw.copy()
+        self.tool_rotations = Rotation.from_euler('z', yaw, degrees=True).as_matrix()
+
+    def targets(self, positions, rotations):
+        target = np.tile(np.eye(4), (2, 1, 1))
+        target[:, :3, 3] = self.robot_shoulders+self.scale*(positions-self.human_shoulders)
+        target[:, :3, :3] = rotations@self.tool_rotations
+        return target
+
+    def project(self, targets):
+        projected = targets.copy()
+        offset = targets[:, :3, 3]-self.robot_shoulders
+        distance = np.linalg.norm(offset, axis=1)
+        projected[:, :3, 3] = self.robot_shoulders+offset*np.minimum(
+            1., self.reach/np.maximum(distance, 1e-12))[:, None]
+        return projected, bool(np.any(distance > self.reach))
+
+    def controller_poses(self, targets):
+        """Inverse mapping for explicit, bounded simulation test fixtures."""
+        return (self.human_shoulders+(targets[:, :3, 3]-self.robot_shoulders)/self.scale,
+                targets[:, :3, :3]@self.tool_rotations.transpose(0, 2, 1))
 
 
 class PoseIK:
@@ -212,7 +270,9 @@ def check_bimanual_geometry(models, joints, table_top, obstacles):
 
 class BimanualClutch:
     def __init__(self, models, *, timeout=.25, speed=.35, acceleration=.7,
-                 table_top=-.15, obstacles=(), translation_scale=1.):
+                 table_top=-.15, obstacles=(), translation_scale=1.,
+                 shoulder_forward=-.05, shoulder_half_width=.18, shoulder_down=.20,
+                 tool_yaw_degrees=(-90., 90.)):
         if (not all(math.isfinite(v) for v in (timeout, speed, acceleration, table_top, translation_scale))
                 or not 0 < timeout <= .25 or speed <= 0 or acceleration <= 0 or not 0 < translation_scale <= 2):
             raise ValueError('invalid_teleop_limits')
@@ -220,6 +280,8 @@ class BimanualClutch:
         self.timeout, self.speed, self.acceleration = timeout, speed, acceleration
         self.table_top, self.obstacles = table_top, tuple(tuple(box) for box in obstacles)
         self.translation_scale = translation_scale
+        self.mapping = AnatomicalArmMapping(self.models, translation_scale, shoulder_forward,
+                                            shoulder_half_width, shoulder_down, tool_yaw_degrees)
         self.solvers = [PoseIK(model) for model in self.models]
         self.active = self.armed = False
         self.state, self.reason = 'release_required', 'startup_release_required'
@@ -227,8 +289,8 @@ class BimanualClutch:
         self.session_id, self.sequence, self.input_stamp = None, -1, float('-inf')
         self.retired_sessions = set()
         self.received = self.last_tick = float('-inf')
-        self.positions = self.controller_start = self.tool_start = self.command = None
-        self.rotations = self.rotation_start = self.tool_poses_start = self.targets = None
+        self.positions = self.command = None
+        self.rotations = self.targets = None
         self.measured_position_errors = self.commanded_position_errors = None
         self.measured_orientation_errors = self.commanded_orientation_errors = None
         self.solve_duration = 0.
@@ -274,14 +336,13 @@ class BimanualClutch:
                 raise ValueError('teleop_release_required')
             self.positions = value.positions.copy()
             self.rotations = value.rotations.copy()
+            # The current human pose defines the target immediately, including
+            # on first acquisition and re-clutch. Joint commands still start at
+            # measured feedback and approach this goal through the rate guards.
+            self.targets = self.mapping.targets(self.positions, self.rotations)
             if not self.active:
                 check_bimanual_geometry(self.models, joints, self.table_top, self.obstacles)
                 self.command = np.array(joints, dtype=float, copy=True)
-                self.controller_start = value.positions.copy()
-                self.rotation_start = value.rotations.copy()
-                self.tool_poses_start = np.array([model.fk(q) for model, q in zip(self.models, joints)])
-                self.tool_start = self.tool_poses_start[:, :3, 3].copy()
-                self.targets = self.tool_poses_start.copy()
                 for solver, q in zip(self.solvers, joints):
                     solver.reset(q)
                 self.last_tick, self.active = monotonic, True
@@ -321,21 +382,11 @@ class BimanualClutch:
                 raise ValueError('teleop_servo_deadline')
             if np.max(np.abs(joints-self.command)) > .10:
                 raise ValueError('teleop_joint_tracking_error')
-            self.targets = self.tool_poses_start.copy()
-            delta = self.translation_scale*(self.positions-self.controller_start)
-            self.targets[:, :3, 3] += delta
-            self.targets[:, :3, :3] = self.rotations @ self.rotation_start.transpose(0, 2, 1) @ self.tool_poses_start[:, :3, :3]
-            projected = self.targets.copy()
-            norms = np.linalg.norm(delta, axis=1)
-            projected[:, :3, 3] = self.tool_start+delta*np.minimum(1., .30/np.maximum(norms, 1e-12))[:, None]
-            limited = 'teleop_workspace_projection' if np.any(norms > .30) else None
+            projected, outside_reach = self.mapping.project(self.targets)
+            limited = 'teleop_workspace_projection' if outside_reach else None
             solutions, started = [], time.perf_counter()
-            for i, (solver, target, measured) in enumerate(zip(self.solvers, projected, joints)):
-                # Exact neutral input never creates posture-driven motion, even
-                # at a singularity. It also restores the calibrated joint pose.
-                neutral = (np.linalg.norm(delta[i]) < 1e-6 and
-                           np.linalg.norm(target[:3, :3]-self.tool_poses_start[i, :3, :3]) < 1e-5)
-                solutions.append(solver.posture.copy() if neutral else solver.solve(target, measured))
+            for solver, target, measured in zip(self.solvers, projected, joints):
+                solutions.append(solver.solve(target, measured))
             self.solve_duration = time.perf_counter()-started
             solutions = np.asarray(solutions)
             # Brake before the goal or the measured-feedback lead envelope.

@@ -130,8 +130,10 @@ def stereo_node(monkeypatch):
         def publish(self, message): self.messages.append(message)
 
     node.publisher = Publisher()
+    node.compressed_publisher = Publisher()
     clock = [100.5]
     monkeypatch.setattr(relay.time, 'time', lambda: clock[0])
+    monkeypatch.setattr(relay.time, 'monotonic', lambda: clock[0])
     try:
         yield node, clock
     finally:
@@ -266,3 +268,96 @@ def test_malformed_received_eye_does_not_enter_pair_buffer(stereo_node):
     node.receive('right', right)
     node.publish_latest()
     assert node.pending['left'] is None and node.ready is None and not node.publisher.messages
+
+
+def test_jpeg_keeps_acquisition_pair_eye_order_and_rgb_colors():
+    left, right = stereo_pair(320, 240)
+    for eye, color in ((left, (230, 30, 10)), (right, (15, 40, 220))):
+        eye.step = eye.width * 3
+        eye.data = np.full((eye.height, eye.width, 3), color, np.uint8).tobytes()
+    packed = relay.make_stereo_frame(left, right)
+    message = relay.compress_stereo_frame(packed)
+    assert message.header == packed.header and message.header is not packed.header
+    assert message.format == 'rgb8; jpeg compressed bgr8'
+    assert len(message.data) < len(packed.data) // 10
+    decoded = relay.cv2.imdecode(np.frombuffer(message.data, np.uint8), relay.cv2.IMREAD_COLOR)
+    rgb = relay.cv2.cvtColor(decoded, relay.cv2.COLOR_BGR2RGB)
+    assert rgb.shape == (240, 640, 3)
+    np.testing.assert_allclose(rgb[100, 100], [230, 30, 10], atol=3)
+    np.testing.assert_allclose(rgb[100, 500], [15, 40, 220], atol=3)
+
+
+@pytest.mark.parametrize('quality', [0, 96, 80.5, True])
+def test_jpeg_rejects_invalid_quality(quality):
+    with pytest.raises(ValueError):
+        relay.compress_stereo_frame(relay.make_stereo_frame(*stereo_pair()), quality)
+
+
+def test_compressed_only_demand_starts_both_eyes_without_raw_output(stereo_node):
+    node, clock = stereo_node
+    node.compressed_publisher.count = 1
+    node.refresh_demand()
+    assert all(source is not None for source in node.sources.values())
+    receive_pair(node, stereo_pair())
+    node.publish_latest()
+    assert not node.publisher.messages
+    assert len(node.compressed_publisher.messages) == 1
+    assert node.compressed_publisher.messages[0].header.frame_id == 'k1_head_stereo_optical'
+    # Raw consumers can join without creating another pair or changing stamps.
+    node.publisher.count = 1
+    clock[0] += .04
+    pair = stereo_pair(nanosec=223456789)
+    receive_pair(node, pair)
+    node.publish_latest()
+    assert len(node.publisher.messages) == 1 and len(node.compressed_publisher.messages) == 2
+    assert node.publisher.messages[-1].header == node.compressed_publisher.messages[-1].header
+    node.compressed_publisher.count = node.publisher.count = 0
+    node.refresh_demand()
+    assert all(source is None for source in node.sources.values())
+
+
+def test_rate_cap_retains_only_newest_pair_without_a_second_camera_period(stereo_node):
+    node, clock = stereo_node
+    enable_viewer(node)
+    receive_pair(node, stereo_pair())
+    node.publish_latest()
+    clock[0] += .01
+    receive_pair(node, stereo_pair(nanosec=223456789))
+    node.publish_latest()
+    clock[0] += .01
+    receive_pair(node, stereo_pair(nanosec=323456789))
+    node.publish_latest()
+    assert len(node.publisher.messages) == 1
+    clock[0] += .015
+    node.publish_latest()
+    assert len(node.publisher.messages) == 2
+    assert node.publisher.messages[-1].header.stamp.nanosec == 323456789
+
+
+def test_encoding_cannot_freshen_a_pair_which_expires_during_compression(stereo_node, monkeypatch):
+    node, clock = stereo_node
+    node.compressed_publisher.count = 1
+    node.refresh_demand()
+    encode = relay.compress_stereo_frame
+    def slow_encode(*args):
+        message = encode(*args)
+        clock[0] += 1.1
+        return message
+    monkeypatch.setattr(relay, 'compress_stereo_frame', slow_encode)
+    receive_pair(node, stereo_pair())
+    node.publish_latest()
+    assert not node.compressed_publisher.messages and node.last_published == 0
+
+
+def test_raw_packing_cannot_publish_a_pair_which_expires_during_resize(stereo_node, monkeypatch):
+    node, clock = stereo_node
+    enable_viewer(node)
+    pack = relay.make_stereo_frame
+    def slow_pack(*args):
+        message = pack(*args)
+        clock[0] += 1.1
+        return message
+    monkeypatch.setattr(relay, 'make_stereo_frame', slow_pack)
+    receive_pair(node, stereo_pair())
+    node.publish_latest()
+    assert not node.publisher.messages

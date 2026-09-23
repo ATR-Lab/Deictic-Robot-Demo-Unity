@@ -9,7 +9,7 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-from sensor_msgs.msg import Image
+from sensor_msgs.msg import Image, CompressedImage
 
 
 def acquisition_stamp_ns(message):
@@ -88,24 +88,48 @@ def make_stereo_frame(left, right, max_width=480, max_height=360):
     return output
 
 
+def compress_stereo_frame(frame, quality=80):
+    """One JPEG for the complete pair, retaining its original acquisition stamp."""
+    if (type(quality) is not int or not 1 <= quality <= 95
+            or frame.header.frame_id != 'k1_head_stereo_optical'
+            or frame.encoding != 'rgb8' or not 2 <= frame.width <= 960
+            or frame.width % 2 or not 1 <= frame.height <= 360
+            or frame.step != frame.width * 3 or len(frame.data) != frame.step * frame.height):
+        raise ValueError('Invalid bounded stereo JPEG input')
+    acquisition_stamp_ns(frame)
+    rgb = np.frombuffer(frame.data, np.uint8).reshape(frame.height, frame.width, 3)
+    ok, encoded = cv2.imencode('.jpg', cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR),
+                               [cv2.IMWRITE_JPEG_QUALITY, quality])
+    if not ok or encoded.nbytes > 524288:
+        raise ValueError('Stereo JPEG encoding failed or exceeded payload bound')
+    message = CompressedImage()
+    message.header = copy.deepcopy(frame.header)
+    message.format = 'rgb8; jpeg compressed bgr8'
+    message.data = encoded.tobytes()
+    return message
+
+
 class CameraViewRelay(Node):
     def __init__(self):
         super().__init__('deictic_camera_view_relay')
         defaults = dict(left_source_topic='/k1/head_camera/left/image_raw',
                         right_source_topic='/k1/head_camera/right/image_raw',
                         output_topic='/deictic/camera_view/stereo/image_raw',
-                        max_width=480, max_height=360, display_hz=5., max_age_s=1.)
+                        compressed_topic='/deictic/camera_view/stereo/image_raw/compressed',
+                        max_width=480, max_height=360, display_hz=30., max_age_s=1., jpeg_quality=80)
         for key, value in defaults.items():
             self.declare_parameter(key, value)
         self.settings = {key: self.get_parameter(key).value for key in defaults}
         cfg = self.settings
         if (not 1 <= cfg['max_width'] <= 480 or not 1 <= cfg['max_height'] <= 360
-                or not math.isfinite(cfg['display_hz']) or not 0 < cfg['display_hz'] <= 5
+                or not math.isfinite(cfg['display_hz']) or not 0 < cfg['display_hz'] <= 30
                 or not math.isfinite(cfg['max_age_s']) or cfg['max_age_s'] <= 0
-                or not all(cfg[key] for key in ('left_source_topic', 'right_source_topic', 'output_topic'))
-                or len({cfg['left_source_topic'], cfg['right_source_topic'], cfg['output_topic']}) != 3):
+                or type(cfg['jpeg_quality']) is not int or not 1 <= cfg['jpeg_quality'] <= 95
+                or not all(cfg[key] for key in ('left_source_topic', 'right_source_topic', 'output_topic', 'compressed_topic'))
+                or len({cfg['left_source_topic'], cfg['right_source_topic'], cfg['output_topic'], cfg['compressed_topic']}) != 4):
             raise ValueError('Invalid bounded display relay parameters')
         self.publisher = self.create_publisher(Image, cfg['output_topic'], 1)
+        self.compressed_publisher = self.create_publisher(CompressedImage, cfg['compressed_topic'], 1)
         # Large fragmented RGB needs retransmission on the host UDP transport.
         # Bound completed DDS history to one image; capture age is still checked
         # at receipt and publication, so delayed delivery cannot freshen a frame.
@@ -117,13 +141,16 @@ class CameraViewRelay(Node):
         self.ready = None
         self.last_received = dict(left=0, right=0)
         self.last_published = 0
+        self.next_publish = 0.
         self.last_warning = -float('inf')
-        self.create_timer(.25, self.refresh_demand)
-        self.create_timer(1 / cfg['display_hz'], self.publish_latest)
+        self.create_timer(.1, self.refresh_demand)
+        # Flush new pairs promptly instead of adding another phase of a 5 Hz
+        # image timer. The separate publication cap still bounds output rate.
+        self.create_timer(.005, self.publish_latest)
         self.get_logger().info('Head stereo display relay idle; estimator inputs remain separate')
 
     def refresh_demand(self):
-        wanted = self.publisher.get_subscription_count() > 0
+        wanted = self.has_demand()
         if wanted and self.sources['left'] is None:
             for eye in self.sources:
                 self.sources[eye] = self.create_subscription(
@@ -141,6 +168,10 @@ class CameraViewRelay(Node):
         self.pending = dict(left=None, right=None)
         self.ready = None
 
+    def has_demand(self):
+        return (self.publisher.get_subscription_count() > 0
+                or self.compressed_publisher.get_subscription_count() > 0)
+
     def fresh(self, stamp):
         return -.25 <= time.time() - stamp * 1e-9 <= self.settings['max_age_s']
 
@@ -150,7 +181,7 @@ class CameraViewRelay(Node):
             self.last_warning = time.monotonic()
 
     def receive(self, eye, message):
-        if self.sources[eye] is None or self.publisher.get_subscription_count() == 0:
+        if self.sources[eye] is None or not self.has_demand():
             return
         try:
             stamp = validate_stereo_eye(message)
@@ -178,12 +209,14 @@ class CameraViewRelay(Node):
             self.warn_rejected(error)
 
     def publish_latest(self):
-        if self.publisher.get_subscription_count() == 0:
+        if not self.has_demand():
             self.clear_frames()
             return
         for eye, message in self.pending.items():
             if message is not None and not self.fresh(acquisition_stamp_ns(message)):
                 self.pending[eye] = None
+        if time.monotonic() < self.next_publish:
+            return
         pair, self.ready = self.ready, None
         if pair is None:
             return
@@ -192,8 +225,15 @@ class CameraViewRelay(Node):
             if stamp <= self.last_published or not self.fresh(stamp):
                 return
             output = make_stereo_frame(*pair, self.settings['max_width'], self.settings['max_height'])
-            self.publisher.publish(output)
+            if self.compressed_publisher.get_subscription_count() > 0:
+                compressed = compress_stereo_frame(output, self.settings['jpeg_quality'])
+                if not self.fresh(stamp):
+                    return
+                self.compressed_publisher.publish(compressed)
+            if self.publisher.get_subscription_count() > 0 and self.fresh(stamp):
+                self.publisher.publish(output)
             self.last_published = stamp
+            self.next_publish = time.monotonic() + 1 / self.settings['display_hz']
         except (ValueError, TypeError, AttributeError, cv2.error) as error:
             self.warn_rejected(error)
 

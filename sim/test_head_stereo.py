@@ -47,6 +47,8 @@ class HeadStereoGeometryTests(unittest.TestCase):
         self.assertGreater(left[1], right[1])
         self.assertEqual(spec['parent_link'], 'aahead_pitch_link')
         self.assertTrue(spec['simulation_only'])
+        self.assertEqual(spec['resolution'], [320, 240])
+        self.assertEqual(spec['max_rate_hz'], 15.)
 
     def test_optical_origins_are_in_front_of_entire_vendor_head_mesh(self):
         data = (URDF.parent/'meshes/Head_2.STL').read_bytes()
@@ -65,23 +67,28 @@ class HeadStereoGeometryTests(unittest.TestCase):
         left,right = [np.array(spec['eyes'][side]['position_parent']) for side in ('left','right')]
         self.assertAlmostEqual(np.linalg.norm(right-left),.08)
         with self.assertRaises(ValueError): stereo_mount(width=1280)
+        self.assertEqual(stereo_mount(width=640, rate_hz=10.)['resolution'], [640, 480])
+        for rate in (0., 31., float('nan'), float('inf')):
+            with self.assertRaises(ValueError): stereo_mount(rate_hz=rate)
 
 
 class HeadStereoScheduleTests(unittest.TestCase):
-    def test_no_demand_pending_capture_timeout_and_backoff(self):
+    def test_no_demand_and_stall_diagnostic_preserve_a_warm_requested_pipeline(self):
         schedule = StereoSchedule()
         self.assertFalse(schedule.request(1.,False))
         self.assertTrue(schedule.request(1.,True))
         self.assertTrue(schedule.request(1.19,True))
         self.assertEqual(schedule.requests,1)
         self.assertTrue(schedule.request(2.99,True))
-        self.assertFalse(schedule.request(3.01,True))
+        self.assertTrue(schedule.request(3.01,True))
         self.assertEqual(schedule.timeouts,1)
-        self.assertFalse(schedule.request(3.10,True))
+        self.assertTrue(schedule.request(3.10,True))
         self.assertTrue(schedule.request(3.22,True))
-        self.assertEqual(schedule.requests,2)
+        self.assertEqual(schedule.requests,1)
         self.assertFalse(schedule.request(3.23,False))
         self.assertFalse(schedule.pending)
+        self.assertTrue(schedule.request(3.24,True))
+        self.assertEqual(schedule.requests,2)
 
     def test_request_watermark_excludes_pre_request_cached_frames(self):
         schedule = StereoSchedule()
@@ -89,10 +96,11 @@ class HeadStereoScheduleTests(unittest.TestCase):
         self.assertFalse(schedule.accept(frame(60),frame(60),1.1))
         self.assertFalse(schedule.accept(frame(61),frame(61),1.1))
         self.assertTrue(schedule.accept(frame(62),frame(62),1.1))
-        self.assertFalse(schedule.pending)
+        self.assertTrue(schedule.pending, 'Accepting a pair must not turn off deferred renderer callbacks')
 
     def test_reject_mismatched_missing_and_unequal_size_frames(self):
         schedule = StereoSchedule()
+        schedule.request(1., True)
         self.assertFalse(schedule.accept(None,frame(),1.))
         self.assertFalse(schedule.accept(frame(60),frame(61),1.))
         self.assertFalse(schedule.accept(frame(),replace(frame(),rendering_time=2.),1.))
@@ -101,7 +109,8 @@ class HeadStereoScheduleTests(unittest.TestCase):
         self.assertTrue(schedule.accept(frame(),frame(),1.))
 
     def test_duplicate_old_frames_and_publication_rate_rejected_on_resume(self):
-        schedule = StereoSchedule()
+        schedule = StereoSchedule(rate_hz=5.)
+        schedule.request(1., True)
         self.assertTrue(schedule.accept(frame(),frame(),1.))
         self.assertFalse(schedule.accept(frame(61),frame(61),1.1))
         self.assertTrue(schedule.accept(frame(61),frame(61),1.21))
@@ -110,6 +119,25 @@ class HeadStereoScheduleTests(unittest.TestCase):
         self.assertFalse(schedule.accept(frame(61),frame(61),10.))
         self.assertFalse(schedule.accept(frame(),frame(),10.))
         self.assertTrue(schedule.accept(frame(62),frame(62),10.))
+
+    def test_newest_pair_is_not_queued_behind_rate_limited_frames(self):
+        schedule = StereoSchedule(rate_hz=15.)
+        schedule.request(1., True)
+        self.assertTrue(schedule.accept(frame(60), frame(60), 1.))
+        self.assertFalse(schedule.accept(frame(61), frame(61), 1.02))
+        self.assertFalse(schedule.accept(frame(62), frame(62), 1.04))
+        self.assertTrue(schedule.accept(frame(63), frame(63), 1.07))
+        self.assertEqual(schedule.last_reference, Fraction(63, 60))
+        self.assertFalse(schedule.accept(frame(62), frame(62), 1.14))
+        self.assertTrue(schedule.request(1.15, True))
+        self.assertEqual(schedule.requests, 1, 'Continuous demand has one acquisition epoch')
+
+    def test_pair_cannot_publish_without_demand(self):
+        schedule = StereoSchedule()
+        self.assertFalse(schedule.accept(frame(), frame(), 1.))
+        schedule.request(1., True)
+        schedule.request(1.01, False)
+        self.assertFalse(schedule.accept(frame(), frame(), 1.02))
 
 
 class Publisher:
@@ -130,7 +158,7 @@ class Message:
 class HeadStereoPublisherTests(unittest.TestCase):
     def make_display(self):
         display = HeadStereoDisplay.__new__(HeadStereoDisplay)
-        display.spec = stereo_mount()
+        display.spec = stereo_mount(width=640)
         display.products = {side:Product() for side in ('left','right')}
         display.publishers = {side:(Publisher(),Publisher()) for side in ('left','right')}
         display.cameras = {side:types.SimpleNamespace(
@@ -149,6 +177,7 @@ class HeadStereoPublisherTests(unittest.TestCase):
         display.render_opportunities,display.requested_renders = 0,0
         display.next_diagnostic = float('inf')
         display.subscriber_counts,display.last_decision = {},''
+        display.last_capture_age_s,display.last_publish_wall,display.last_publish_interval_s = None,None,None
         return display
 
     def test_render_products_wait_for_deferred_callback_then_disable_without_demand(self):
@@ -193,6 +222,17 @@ class HeadStereoPublisherTests(unittest.TestCase):
             self.assertEqual(display.last_decision,'capture_too_old')
         self.assertEqual(display.published_pairs,0)
 
+    def test_rate_gate_does_not_copy_pixels_or_stop_render_products(self):
+        display = self.make_display()
+        display.publishers['left'][0].demand = 1
+        display.prepare_render(1.)
+        display.schedule.next_publish = 1.05
+        with patch('head_stereo.snapshot') as capture:
+            display.finish_render(1.02)
+        capture.assert_not_called()
+        self.assertTrue(all(product.enabled for product in display.products.values()))
+        self.assertEqual(display.last_decision, 'publication_rate_gate')
+
     def test_pair_and_intrinsics_share_stamp_with_distinct_frames(self):
         display = self.make_display()
         display.publishers['left'][0].demand = 1
@@ -211,7 +251,8 @@ class HeadStereoPublisherTests(unittest.TestCase):
         self.assertEqual(left.header.stamp.sec,123)
         self.assertEqual(left.header.stamp.nanosec,456)
         self.assertNotEqual(left.header.stamp.nanosec,display.clock_ns%1_000_000_000)
-        self.assertFalse(any(product.enabled for product in display.products.values()))
+        self.assertTrue(all(product.enabled for product in display.products.values()),
+                        'Publishing must leave the requested renderer pipeline warm')
         self.assertNotEqual(left.header.frame_id,right.header.frame_id)
         self.assertEqual((left.width,left.height,left.step,left.encoding),(640,480,1920,'rgb8'))
         for side in ('left','right'):

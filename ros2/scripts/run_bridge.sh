@@ -67,7 +67,7 @@ cleanup() {
   [[ -z "$camera_pid" ]] || kill -INT "$camera_pid" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
-"$PYTHON" -m ros_tcp_endpoint.default_server_endpoint --ros-args -p "ROS_IP:=$BIND_IP" -p "ROS_TCP_PORT:=$TCP_PORT" &
+"$PYTHON" "$REPO/ros2/scripts/run_endpoint.py" --ros-args -p "ROS_IP:=$BIND_IP" -p "ROS_TCP_PORT:=$TCP_PORT" &
 endpoint_pid=$!
 "$PYTHON" -m deictic_control.node "${args[@]}" &
 control_pid=$!

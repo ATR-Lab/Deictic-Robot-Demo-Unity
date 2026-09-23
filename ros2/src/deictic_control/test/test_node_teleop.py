@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 rclpy = pytest.importorskip('rclpy')
 from rclpy.parameter import Parameter
@@ -58,10 +59,14 @@ def relay_ack(node, **extra):
     node.on_teleop_relay_status(String(data=json.dumps(data)))
 
 def input_message(node, sequence, held, **extra):
-    data = dict(schema_version=2, session_id='client', sequence=sequence, stamp=node.now(),
-                frame_id='teleop_head', clutch=held, left_tracked=True, right_tracked=True,
-                left_position=[0., .2, .1], right_position=[0., -.2, .1],
-                left_rotation=[0.,0.,0.,1.], right_rotation=[0.,0.,0.,1.])
+    targets = np.array([model.fk(q) for model, q in zip(node.teleop.models,
+                        [[0., 0., 0., 0.], [0., .5, 0., 0.]])])
+    positions, rotations = node.teleop.mapping.controller_poses(targets)
+    quaternions = Rotation.from_matrix(rotations).as_quat()
+    data = dict(schema_version=3, session_id='client', sequence=sequence, stamp=node.now(),
+                frame_id='teleop_body', clutch=held, left_tracked=True, right_tracked=True,
+                left_position=positions[0].tolist(), right_position=positions[1].tolist(),
+                left_rotation=quaternions[0].tolist(), right_rotation=quaternions[1].tolist())
     data.update(extra)
     node.on_teleop(String(data=json.dumps(data)))
 
@@ -83,7 +88,9 @@ def test_both_arm_teleop_runs_without_learned_alignment_and_preserves_deictic_ga
     assert transitions[0]['sequence'] < transitions[1]['sequence']
     np.testing.assert_allclose(transitions[1]['positions'], controller.teleop_joints.reshape(-1))
     clock[0] += .05
-    input_message(controller, 2, True, left_position=[.01, .2, .1], right_position=[.01, -.2, .1])
+    target = controller.teleop.targets.copy(); target[:, 0, 3] += .01
+    position, _ = controller.teleop.mapping.controller_poses(target)
+    input_message(controller, 2, True, left_position=position[0].tolist(), right_position=position[1].tolist())
     controller.teleop_tick()
     controller.publish_status()
     status = json.loads(controller.status_pub.messages[-1].data)
@@ -240,17 +247,20 @@ def test_legacy_preview_is_bound_to_held_left_arm_and_cannot_ignore_its_motion(n
     assert 'held_left_arm_changed' in controller.operation
 
 
-def test_v1_protocol_fault_survives_fresh_release_and_v2_status_exposes_scale(node):
+@pytest.mark.parametrize('old_version', [1, 2])
+def test_old_protocol_fault_survives_fresh_release_and_v3_status_exposes_mapping(node, old_version):
     controller, clock = node
-    input_message(controller, 0, False, schema_version=1)
+    input_message(controller, 0, False, schema_version=old_version)
     assert controller.teleop.last_fault == 'protocol_version_mismatch'
     input_message(controller, 1, False)
     status = json.loads(controller.status_pub.messages[-1].data)
     assert status['teleop_ready'] and status['teleop_relay_ready']
-    assert status['teleop_protocol_version'] == 2
+    assert status['teleop_protocol_version'] == 3
     assert status['teleop_translation_scale'] == pytest.approx(.558833641)
     assert status['teleop_last_fault'] == 'protocol_version_mismatch'
     assert status['teleop_position_error'] is None
+    np.testing.assert_allclose(status['teleop_human_shoulders'], [[-.05, .18, -.20], [-.05, -.18, -.20]])
+    np.testing.assert_allclose(status['teleop_tool_yaw_degrees'], [-90., 90.])
 
 
 @pytest.mark.parametrize('cause', ['missing', 'old_source', 'old_receipt', 'not_ready', 'foreign_owner'])
@@ -301,7 +311,9 @@ def test_ack_replay_cannot_renew_lease_and_measured_errors_are_reported(node):
     clock[0] += .1
     controller.on_teleop_relay_status(String(data=json.dumps(old)))
     assert controller.teleop_relay_received == received
-    input_message(controller, 2, True, left_position=[.05,.2,.1])
+    positions, _ = controller.teleop.mapping.controller_poses(controller.teleop.targets)
+    positions[0, 0] += .05
+    input_message(controller, 2, True, left_position=positions[0].tolist())
     controller.teleop_tick(); controller.publish_status()
     status = json.loads(controller.status_pub.messages[-1].data)
     assert status['teleop_position_error'] == pytest.approx(.05*status['teleop_translation_scale'])

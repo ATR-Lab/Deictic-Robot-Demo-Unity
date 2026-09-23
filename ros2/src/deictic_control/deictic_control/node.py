@@ -40,6 +40,8 @@ class DeicticControl(Node):
             'allow_execution': False, 'allow_legacy_execute': False, 'mock_joint_states': False,
             'allow_teleoperation': False,
             'teleop_human_arm_length': .60, 'teleop_translation_scale': 0.,
+            'teleop_shoulder_forward': -.05, 'teleop_shoulder_half_width': .18,
+            'teleop_shoulder_down': .20, 'teleop_tool_yaw_degrees': [-90., 90.],
             'synthetic_base_from_headset_world': [-1.2, 0., -.9, 0., 0., 0., 1.],
             'tool_offset': [0., -.10, 0.], 'table_top': -.15,
             'registration_timeout': 1., 'joint_timeout': .5, 'plan_timeout': 10.,
@@ -83,7 +85,11 @@ class DeicticControl(Node):
         self.teleop = BimanualClutch((self.left_arm, self.arm), speed=self.param('max_joint_speed'),
                                     acceleration=self.param('max_joint_acceleration'),
                                     table_top=self.param('table_top'), obstacles=self.obstacles,
-                                    translation_scale=scale)
+                                    translation_scale=scale,
+                                    shoulder_forward=self.param('teleop_shoulder_forward'),
+                                    shoulder_half_width=self.param('teleop_shoulder_half_width'),
+                                    shoulder_down=self.param('teleop_shoulder_down'),
+                                    tool_yaw_degrees=self.param('teleop_tool_yaw_degrees'))
         self.teleop_joints = self.teleop_joint_time = None
         self.teleop_session_id, self.teleop_sequence = str(uuid.uuid4()), 0
         self.teleop_output_initialized = False
@@ -585,8 +591,11 @@ class DeicticControl(Node):
                       teleop_active=self.teleop.active, teleop_state=self.teleop.state,
                       teleop_limited=self.teleop.state == 'limited',
                       teleop_reason=guard or self.teleop.reason,
-                      teleop_protocol_version=2,
+                      teleop_protocol_version=3,
                       teleop_translation_scale=self.teleop.translation_scale,
+                      teleop_human_shoulders=self.teleop.mapping.human_shoulders.tolist(),
+                      teleop_robot_shoulders=self.teleop.mapping.robot_shoulders.tolist(),
+                      teleop_tool_yaw_degrees=self.teleop.mapping.tool_yaw_degrees.tolist(),
                       teleop_last_fault=self.teleop.last_fault,
                       teleop_relay_ready=(self.teleop_relay_status is not None and
                           self.teleop_relay_status['ready'] and
