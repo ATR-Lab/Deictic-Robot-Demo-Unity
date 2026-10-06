@@ -12,7 +12,8 @@ import struct
 
 
 DISPLAY_TOPICS = frozenset((b'/deictic/camera_view/stereo/image_raw',
-                           b'/deictic/camera_view/stereo/image_raw/compressed'))
+                           b'/deictic/camera_view/stereo/image_raw/compressed',
+                           b'/transition/hardware/head/image_raw/compressed'))
 
 
 def display_topic(packet):

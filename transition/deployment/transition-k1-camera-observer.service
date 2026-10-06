@@ -1,0 +1,13 @@
+[Unit]
+Description=Receive-only K1 diagnostic head camera
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash %h/transition-observation/scripts/run_robot_camera.sh --mono-source left
+# Keep a failed observer stopped. The 2026-09-24 memory incident caused repeated
+# vendor service resets; automatic restarts must not recreate that traffic.
+Restart=no
+
+[Install]
+WantedBy=default.target

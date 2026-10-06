@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "id": "logical-cue-and-reference-v1",
+  "description": "Semantic co-work fixture only: no robot physics or human benefit is claimed.",
+  "initial_facts": {"local.variant": "A", "local.assembled": false, "remote.cue": "pending", "remote.reference_presented": false},
+  "decision_fields": {"remote.cue": "evidence"},
+  "scored_facts": ["remote.cue", "local.variant", "local.assembled"],
+  "skills": [
+    {"id": "read_cue", "kind": "logical_inspect", "parameters": {},
+      "preconditions": {"local.variant": "A"}, "read_set": ["remote.cue"],
+      "write_set": ["remote.cue"], "resources": ["avatar"], "duration_max": 3, "priority": 0,
+      "outcomes": [{"id": "blue", "effects": {"remote.cue": "blue"}}, {"id": "amber", "effects": {"remote.cue": "amber"}}]},
+    {"id": "present_reference", "kind": "logical_present", "parameters": {},
+      "preconditions": {"local.variant": "A"}, "write_set": ["remote.reference_presented"],
+      "resources": ["avatar"], "duration_max": 2, "priority": 1,
+      "outcomes": [{"id": "presented", "effects": {"remote.reference_presented": true}}]}
+  ],
+  "scoring_rules": [
+    {"when": {"remote.cue": "pending"}, "responses": [{"kind": "request_evidence", "target": "cue"}]},
+    {"when": {"remote.cue": "blue", "local.assembled": false}, "responses": [{"kind": "execute", "target": "select_blue"}]},
+    {"when": {"remote.cue": "amber", "local.assembled": false}, "responses": [{"kind": "execute", "target": "select_amber"}]},
+    {"when": {"local.assembled": true}, "responses": [{"kind": "defer", "target": "local_complete"}]}
+  ]
+}

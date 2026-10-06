@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "transition-autonomy"
+version = "0.1.0"
+description = "Auditable task-level shared autonomy for Booster K1 and Isaac Sim"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3,<10"]
+
+[project.scripts]
+transition-autonomy = "transition_autonomy.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"examples" = "transition_autonomy/examples"

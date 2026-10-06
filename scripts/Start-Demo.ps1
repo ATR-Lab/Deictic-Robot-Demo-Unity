@@ -67,6 +67,11 @@ if (-not $NoViewer) {
 }
 Write-Host 'Authenticate to SSH if prompted. Wait for the launcher readiness message before entering Unity Play mode.'
 Write-Host 'Keep this terminal open. Ctrl+C stops this launch and closes its tunnel; the viewer window may be closed separately.'
+$transitionSettings = Join-Path (Split-Path $PSScriptRoot -Parent) 'Deictic-Robot-Demo/Assets/StreamingAssets/transition-runtime.json'
+New-Item -ItemType Directory -Force -Path (Split-Path $transitionSettings) | Out-Null
+@{ schema_version=1; control_mode='manual_simulation'; ros_host='127.0.0.1'; ros_port=10000;
+    operator_url='http://127.0.0.1:8766'; robot_camera_topic='/deictic/camera_view/stereo/image_raw/compressed';
+    robot_camera_stereo=$true } | ConvertTo-Json | Set-Content -Encoding utf8 $transitionSettings
 & $ssh @sshArgs
 if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 130) {
     throw "Demo SSH session ended with code $LASTEXITCODE. Review the preflight/service messages above."

@@ -8,6 +8,7 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using UnityEngine.XR;
 using UnityEngine.XR.Management;
+using UnityEngine.XR.OpenXR;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -62,6 +63,12 @@ public sealed class NativeSimulatorFixture
             }
             Assert.That(manager.activeLoader, Is.Not.Null, "Meta XR Simulator OpenXR loader did not initialize");
             Assert.That(manager.activeLoader.GetType().Name, Does.Contain("OpenXR"));
+            // A reused loader can still belong to Quest Link. Environment selection alone
+            // does not establish the identity of an already initialized native instance.
+            Assert.That(OpenXRRuntime.name, Is.EqualTo("Meta XR Simulator"),
+                "The active native runtime is not Meta XR Simulator; no physical headset test is permitted here");
+            Assert.That(OpenXRRuntime.version, Is.Not.Null.And.Not.Empty);
+            Debug.Log("Verified native runtime: " + OpenXRRuntime.name + " " + OpenXRRuntime.version);
             if (!FindRunningDisplay())
             {
                 manager.StartSubsystems();

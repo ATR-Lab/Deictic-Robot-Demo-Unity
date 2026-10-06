@@ -15,6 +15,9 @@ MonoBehaviour:
   rosHost: 127.0.0.1
   rosPort: 10000
   connectOnStart: 1
+  controlMode: 1
+  transitionOperatorUrl: http://127.0.0.1:8766
+  transitionPanelWorldPosition: {x: -0.82, y: 1.25, z: 1.4}
   syntheticScene: 1
   publishHeadsetCamera: 0
   agreementDistance: 0.04

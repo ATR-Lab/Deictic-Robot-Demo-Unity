@@ -14,6 +14,9 @@ namespace Deictic
         {
             if (!settings) settings = Resources.Load<DeicticSettings>("DeicticSettings");
             if (!settings) { Debug.LogError("Run Deictic > Build Simulation Assets first."); enabled = false; return; }
+            settings = Instantiate(settings);
+            string configError = TransitionRuntimeConfig.Load(settings);
+            if (configError != null) Debug.LogError(configError);
             OVRCameraRig rig = FindFirstObjectByType<OVRCameraRig>();
             Transform head = rig ? rig.centerEyeAnchor : Camera.main ? Camera.main.transform : null;
             if (!head) { Debug.LogError("An OVRCameraRig or MainCamera is required."); enabled = false; return; }
@@ -22,7 +25,7 @@ namespace Deictic
             input = gameObject.AddComponent<DeicticInput>();
             input.bridge = bridge; input.head = head; input.pointer = rig ? rig.rightControllerAnchor : null;
             input.viewCamera = head.GetComponent<Camera>(); input.synthetic = settings.syntheticScene;
-            if (settings.bimanualTeleop)
+            if (settings.bimanualTeleop && bridge.DirectCommandsAllowed)
             {
                 var teleop = gameObject.AddComponent<BimanualTeleop>();
                 teleop.bridge = bridge; teleop.head = head; teleop.bodyFrame = rig ? rig.trackingSpace : null;
@@ -33,12 +36,23 @@ namespace Deictic
             cameraView = gameObject.AddComponent<DeicticCameraView>();
             cameraView.Initialize(head, bridge);
             input.cameraView = cameraView;
-            var headTracking = gameObject.AddComponent<RobotHeadTracking>();
-            headTracking.bridge = bridge; headTracking.head = head;
-            headTracking.bodyFrame = rig ? rig.trackingSpace : null;
-            headTracking.cameraView = cameraView;
-            input.robotHead = headTracking;
-            if (settings.syntheticScene) BuildWorkcell();
+            if (bridge.DirectCommandsAllowed)
+            {
+                var headTracking = gameObject.AddComponent<RobotHeadTracking>();
+                headTracking.bridge = bridge; headTracking.head = head;
+                headTracking.bodyFrame = rig ? rig.trackingSpace : null;
+                headTracking.cameraView = cameraView;
+                input.robotHead = headTracking;
+            }
+            else
+            {
+                var taskPanel = gameObject.AddComponent<TransitionTaskPanel>();
+                taskPanel.Initialize(head, settings, bridge);
+                input.transitionPanel = taskPanel;
+                if (settings.controlMode == DeicticControlMode.TransitionSimulation)
+                    cameraView.Stream.UseDisplayClock(taskPanel.Client.DisplayClock);
+            }
+            if (settings.syntheticScene && bridge.DirectCommandsAllowed) BuildWorkcell();
             if (settings.syntheticScene && !FindFirstObjectByType<Light>())
             {
                 var light = new GameObject("Workcell light").AddComponent<Light>();
@@ -47,7 +61,7 @@ namespace Deictic
             }
             if (settings.robotVisual)
             {
-                for (int i = 0; i < 2; i++)
+                for (int i = 0; i < (bridge.DirectCommandsAllowed ? 2 : 1); i++)
                 {
                     var robot = Instantiate(settings.robotVisual, new Vector3(0, .9f, 1.2f), Quaternion.identity);
                     robot.name = i == 0 ? "K1 measured state" : "K1 trajectory preview";
@@ -60,7 +74,7 @@ namespace Deictic
             label.transform.localPosition = new Vector3(-.41f, .27f, .75f);
             hud = label.AddComponent<TextMesh>();
             hud.characterSize = .0036f; hud.fontSize = 42; hud.color = Color.white;
-            if (settings.publishHeadsetCamera && !settings.syntheticScene)
+            if (settings.publishHeadsetCamera && !settings.syntheticScene && bridge.DirectCommandsAllowed)
             {
                 var publisher = gameObject.AddComponent<QuestCameraPublisher>(); publisher.bridge = bridge; publisher.surface = input;
             }
@@ -68,6 +82,7 @@ namespace Deictic
         void Update()
         {
             if (!hud || bridge == null) return;
+            if (!bridge.DirectCommandsAllowed) { hud.gameObject.SetActive(false); return; }
             hud.gameObject.SetActive(!cameraView.RobotView || bridge.TeleopControlsBusy || !string.IsNullOrEmpty(bridge.LastTeleopFault));
             string alignment = bridge.CanCommit ? "ALIGNED" : "COMMITS BLOCKED";
             var status = bridge.Status;

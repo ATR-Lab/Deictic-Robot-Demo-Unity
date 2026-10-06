@@ -1,0 +1,87 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>K1 Shared Task Console</title>
+<style>
+:root{font:15px system-ui;color:#e6edf7;background:#10151f}body{max-width:1180px;margin:36px auto;padding:0 22px}h1{font-size:30px;margin-bottom:4px}h2{font-size:18px}p{color:#aebbd0;line-height:1.5}button,input,select{font:inherit;border:1px solid #4a5d79;border-radius:6px;background:#18243a;color:#eef5ff;padding:9px;margin:4px 4px 4px 0}button{cursor:pointer}button:hover{background:#294568}button:disabled{opacity:.4;cursor:default}.stop{background:#752e3b}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{border:1px solid #34435a;border-radius:12px;padding:20px;background:#151e2d}pre{white-space:pre-wrap;overflow-wrap:anywhere;color:#bdd3ef;max-height:320px;overflow:auto;font:12px ui-monospace,monospace}.badge{background:#23435a;border-radius:12px;padding:5px 12px;display:inline-block;margin:8px 8px 0 0}#message{min-height:26px;color:#ffd49b}#fault{color:#ffadac}label{display:block;margin-top:12px}table{width:100%;border-collapse:collapse;font-size:13px}td{padding:7px;border-bottom:1px solid #34435a;overflow-wrap:anywhere}small{color:#aebbd0}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+</style>
+<h1>K1 Shared Task Console</h1><p>Coordinate local work and measured remote reaching. Record a return decision against a confirmed task snapshot.</p>
+<div id="badges"></div><p id="fault"></p><p id="message" role="status"></p>
+<div class="grid"><section class="card"><h2>Task authority and attention</h2>
+<button data-op="grant">Grant this task · 10 min</button><button data-op="acknowledge">Acknowledge current facts</button><br>
+<button data-op="attention" data-args='{"domain":"local"}'>Attend local work</button><button data-op="attention" data-args='{"domain":"remote"}'>Attend robot</button>
+<button data-op="run" data-args='{"enabled":true}'>Start sequencing</button><button data-op="run" data-args='{"enabled":false}'>Pause new skills</button><br>
+<button class="stop" data-op="revoke">Revoke authority / request stop</button>
+<p><small>Stop is a task-level request. The robot's independent emergency-stop system remains separate.</small></p>
+<pre id="authority"></pre></section>
+<section class="card"><h2>Productive local work</h2><p>Commit only the local configuration or selection you have actually completed.</p>
+<label>Local fact <input id="localkey" value="local.ready"></label><label>Value (JSON) <input id="localvalue" value="true"></label>
+<button id="commitlocal">Commit local fact</button><button data-op="quiescent" data-args='{"confirmed":true}'>Confirm local state is stable</button><button data-op="quiescent" data-args='{"confirmed":false}'>Resume local changes</button>
+<p><small>For the K1 example: set local.ready to true; after viewing A or B, set local.selected to "A" or "B".</small></p></section>
+<section class="card"><h2>Return opportunity</h2><button data-op="cue" data-args='{"window":15}'>Cue return · 15 seconds</button><pre id="lease"></pre>
+<label>First deliberate decision <select id="kind"><option value="execute">Execute / select</option><option value="defer">Defer with a reason</option><option value="request_evidence">Request evidence</option></select></label>
+<label>Target or reason <input id="target" value="select_A"></label><button id="respond">Record first decision</button>
+<p><small>Recording a decision does not expand robot authority or substitute for completing the local action.</small></p></section>
+<section class="card"><h2 id="factstitle">Current task facts</h2><table id="facts"></table><h2 id="summarytitle">Changes since acknowledgement</h2><pre id="summary"></pre></section>
+<section class="card"><h2>Robot execution</h2><pre id="execution"></pre><button data-op="reconcile">Inspect reconciliation state</button></section>
+<section class="card"><h2>Event history</h2><p>The full history remains available in both display conditions.</p><button id="historybutton">Refresh history</button><pre id="history"></pre></section></div>
+<script nonce="__TOKEN__">
+const token='__TOKEN__';
+let state=null,displayAck=new Set(),displayPending=new Set(),busy=false,pendingDecision=null,runId=null;
+const out=(id,value)=>document.getElementById(id).textContent=typeof value==='string'?value:JSON.stringify(value,null,2);
+async function act(operation,data={}){
+  try{
+    const r=await fetch('/api/operator',{method:'POST',headers:{'Content-Type':'application/json','X-Session-Token':token},body:JSON.stringify({operation,data})});
+    const v=await r.json();
+    if(!r.ok){
+      if(operation==='respond'&&pendingDecision&&v.response_captured===false&&
+         ['lease_id','decision_id','snapshot_hash'].every(key=>v[key]===pendingDecision[key]))pendingDecision=null;
+      throw Error(v.error);
+    }
+    out('message',operation==='respond'?'Decision recorded: '+v.label:'Recorded: '+operation);
+    await refresh();return v;
+  }catch(e){out('message',e.message);return null}
+}
+document.querySelectorAll('[data-op]').forEach(b=>b.addEventListener('click',()=>act(b.dataset.op,JSON.parse(b.dataset.args||'{}'))));
+document.getElementById('commitlocal').onclick=()=>{try{act('local',{key:document.getElementById('localkey').value,value:JSON.parse(document.getElementById('localvalue').value)})}catch(e){out('message','Enter a JSON value: true, false, or a quoted string.')}};
+document.getElementById('respond').onclick=async()=>{
+  const lease=state?.lease;
+  if(!pendingDecision){
+    if(lease?.status!=='exposed'||!displayAck.has(lease.id))return;
+    pendingDecision={lease_id:lease.id,snapshot_hash:lease.snapshot_hash,decision_id:crypto.randomUUID(),kind:document.getElementById('kind').value,target:document.getElementById('target').value};
+  }
+  const result=await act('respond',pendingDecision);
+  if(result)pendingDecision=null;
+  await refresh();
+};
+document.getElementById('historybutton').onclick=async()=>out('history',await(await fetch('/api/events')).json());
+async function refresh(){
+  if(busy)return;busy=true;
+  try{
+    const r=await fetch('/api/state');const s=await r.json();if(!r.ok)throw Error(s.error);
+    if(runId!==null&&runId!==s.run_id){pendingDecision=null;displayAck.clear();displayPending.clear();out('message','Run changed. Reload this page before further operations.');}
+    runId=s.run_id;state=s;
+    out('badges',[s.backend,s.policy,s.display,'Attention: '+s.attention].join('  ·  '));
+    out('fault',s.fault?'Run stopped: '+s.fault:'');out('authority',s.authority||'No authority granted');out('lease',s.lease||'No return opportunity');
+    out('execution',{active:s.active,completed:s.completed,sequencing:s.auto_dispatch});
+    const exposed=s.lease?.status==='exposed',facts=exposed?s.lease.snapshot:s.facts;
+    out('factstitle',exposed?'Return snapshot':'Current task facts');
+    const table=document.getElementById('facts');table.replaceChildren();
+    for(const[k,v]of Object.entries(facts)){const tr=document.createElement('tr');for(const text of[k,JSON.stringify(v.value),v.status+' · v'+v.version]){const td=document.createElement('td');td.textContent=text;tr.append(td)}table.append(tr)}
+    document.getElementById('summarytitle').hidden=s.display!=='summary';document.getElementById('summary').hidden=s.display!=='summary';
+    out('summary',exposed?s.lease.decision_summary:s.decision_summary);
+    const responseButton=document.getElementById('respond');
+    responseButton.textContent=pendingDecision?'Retry same decision':'Record first decision';
+    responseButton.disabled=!pendingDecision&&(!exposed||!displayAck.has(s.lease.id));
+    if(exposed&&!displayAck.has(s.lease.id)&&!displayPending.has(s.lease.id)){
+      const leaseId=s.lease.id,snapshotHash=s.lease.snapshot_hash;displayPending.add(leaseId);
+      requestAnimationFrame(()=>requestAnimationFrame(async()=>{
+        try{
+          if(document.visibilityState!=='visible'||state?.lease?.id!==leaseId||state.lease.status!=='exposed')return;
+          const accepted=await act('displayed',{lease_id:leaseId,snapshot_hash:snapshotHash});
+          if(accepted)displayAck.add(leaseId);
+        }finally{displayPending.delete(leaseId)}
+      }));
+    }
+  }catch(e){out('message',e.message)}finally{busy=false}
+}
+refresh();setInterval(refresh,500);
+</script></html>

@@ -1,0 +1,19 @@
+{
+  "model_revision": "3c2dfa99e09beddf092e0d6521dbbcec7e7903ed",
+  "urdf_sha256": "834e17faf4681e5fcae116130a9da6d81b696c7f8278b95f281cec0551ca6124",
+  "joint_names": ["aaright_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_elbow_pitch_joint", "right_elbow_yaw_joint"],
+  "terminal_link": "right_elbow_yaw_link",
+  "tool_offset_m": [0.0, -0.1, 0.0],
+  "joint_tolerance_rad": 0.035,
+  "reference_tolerance_m": 0.012,
+  "velocity_tolerance_rad_s": 0.04,
+  "settle_seconds": 0.3,
+  "max_source_gap_seconds": 0.1,
+  "max_wall_gap_seconds": 0.5,
+  "motion_seconds": 2.0,
+  "profiles": {
+    "home": {"joints_rad": [0.0, 0.8, 0.0, 0.0], "target_id": null},
+    "point_a": {"joints_rad": [-0.4, 0.8, -0.2, 1.2], "target_id": "A"},
+    "point_b": {"joints_rad": [-0.8, 0.65, 0.2, 0.9], "target_id": "B"}
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "id": "k1-measured-pointing-commissioning-v1",
+  "description": "Sequential bidirectional operator/robot integration task, not a scheduling efficacy experiment. Requires measured backend completion and explicit local selections.",
+  "initial_facts": {"local.ready": false, "local.selected": "none", "remote.pointed_target": {"value": null, "status": "unknown"}},
+  "decision_fields": {"remote.pointed_target": "revision"},
+  "scored_facts": ["remote.pointed_target", "local.selected", "local.ready"],
+  "skills": [
+    {"id": "point_a", "kind": "point", "parameters": {"profile": "point_a"},
+      "preconditions": {"local.ready": true}, "read_set": ["local.selected"],
+      "write_set": ["remote.pointed_target"], "resources": ["k1_arm"], "duration_max": 20, "priority": 0,
+      "outcomes": [{"id": "reached", "effects": {"remote.pointed_target": "A"}}]},
+    {"id": "point_b", "kind": "point", "parameters": {"profile": "point_b"},
+      "preconditions": {"local.selected": "A"}, "requires": ["point_a"],
+      "write_set": ["remote.pointed_target"], "resources": ["k1_arm"], "duration_max": 20, "priority": 0,
+      "outcomes": [{"id": "reached", "effects": {"remote.pointed_target": "B"}}]},
+    {"id": "home", "kind": "point", "parameters": {"profile": "home"},
+      "preconditions": {"local.selected": "B"}, "requires": ["point_b"],
+      "write_set": ["remote.pointed_target"], "resources": ["k1_arm"], "duration_max": 20, "priority": 0,
+      "outcomes": [{"id": "reached", "effects": {"remote.pointed_target": null}}]}
+  ],
+  "scoring_rules": [
+    {"when": {"remote.pointed_target": "A"}, "responses": [{"kind": "execute", "target": "select_A"}]},
+    {"when": {"remote.pointed_target": "B"}, "responses": [{"kind": "execute", "target": "select_B"}]},
+    {"when": {"remote.pointed_target": null}, "responses": [{"kind": "defer", "target": "sequence_complete"}]},
+    {"when": {"remote.pointed_target": {"status": "unknown"}}, "responses": [{"kind": "request_evidence", "target": "pointing_state"}]}
+  ]
+}

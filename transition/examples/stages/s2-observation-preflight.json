@@ -1,0 +1,142 @@
+{
+  "schema_version": 1,
+  "stage": "S2",
+  "permit_class": "observation_discovery",
+  "scope": "read_only_hardware",
+  "run_started": true,
+  "planned_count": 1,
+  "attempted_count": 0,
+  "refused_count": 1,
+  "attempts": [],
+  "refusals": [
+    {
+      "id": "s2-preflight-20260924",
+      "stratum": "qualified-read-only-acceptance",
+      "outcome": "refused",
+      "possible_actuation": false,
+      "evidence_refs": [
+        "findings_note"
+      ],
+      "reason": "Qualified S2 acceptance was not admitted because commissioned identity/timing/frame/support evidence remains unavailable."
+    }
+  ],
+  "artifacts": {
+    "bridge_source": {
+      "path": "transition/deployment/k1_observation_bridge.py",
+      "role": "source",
+      "required": true,
+      "sha256": "55974955bb415a6b8715836c9d8e27b672e13a57b9291dcd6854af5c655f135f"
+    },
+    "camera_source": {
+      "path": "transition/deployment/k1_camera_observer.py",
+      "role": "source",
+      "required": true,
+      "sha256": "7baddc00773596d30680c35e320ca5336ba7348d3a7f36fe606d3aba26570a86"
+    },
+    "observation_config": {
+      "path": "transition/config/k1-observation-only.json",
+      "role": "configuration",
+      "required": true,
+      "sha256": "e71e3c66ddfeb3fc44d2bc7ed209ccd51f4613c5b8e5494b8d005276f3c984fd"
+    },
+    "findings_note": {
+      "path": "transition/docs/S2_READ_ONLY_FINDINGS_20260924.md",
+      "role": "evidence",
+      "required": true,
+      "sha256": "39a39a3bcc44395be32244e341b7764211062df8a6d7f72e352727825ac6734a"
+    },
+    "raw_probe_receipt": {
+      "path": "output/transition-validation/physical/s2-raw-probe-receipt.json",
+      "role": "evidence",
+      "required": true
+    },
+    "commissioned_identity": {
+      "path": "output/transition-validation/physical/s2-identity-mode.json",
+      "role": "evidence",
+      "required": true
+    },
+    "timing_calibration": {
+      "path": "output/transition-validation/physical/s2-observation-calibration.json",
+      "role": "evidence",
+      "required": true
+    }
+  },
+  "predicates": {
+    "device_identity": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Approved exact serial/firmware/controller identity record absent.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "controller_mode": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Permitted vendor controller/support combination is not commissioned.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "joint_frame_map": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Indexed joint and frame interpretation requires physical validation.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "observation_timing": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Callback counts do not bound acquisition age, buffering, sample gaps or skew.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "velocity_uncertainty": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Native and derived physical velocity uncertainties are unqualified.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "transform_error_bounds": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Independent endpoint/body/target calibration and uncertainty are absent.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "motor_health": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Firmware-specific health signals require verified interpretation.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "support_evidence": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [],
+      "reason": "Approved physical support record absent.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "read_only_capability": {
+      "status": "passed",
+      "criterion": "Bridge and compressor source expose no SDK movement or vendor command client.",
+      "evidence_refs": [
+        "bridge_source",
+        "camera_source"
+      ],
+      "reason": "Source inspection finds subscriptions/derived telemetry only and no vendor motion/RPC command route.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    }
+  },
+  "final_state": {
+    "motion_state": "unknown",
+    "task_outcome": "not_applicable",
+    "arm_state": "inhibited",
+    "disposition": "Project physical task dispatch remains inhibited; observed delivery is not commissioned motion readiness."
+  },
+  "notes": [
+    "Exploratory joint/camera counts are coordinating-agent reports, not qualified S2 attempts or physical task operation.",
+    "Planned count1 is a prospective acceptance target. The reported record is one preflight refusal, zero admitted acceptance attempts."
+  ]
+}

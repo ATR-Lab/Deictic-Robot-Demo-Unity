@@ -1,0 +1,12 @@
+{
+  "checked_date": "2026-09-23",
+  "specification": "docs/HARDWARE_IMPLEMENTATION_SPEC.md",
+  "specification_sha256": "6f4502776b6b688a64a4fdf55c796bb34af0bd07f2e6a4f085d98cbbf57ec599",
+  "review_scope": "Material vendor-claim mismatches only; no code, robot or server execution.",
+  "material_errors": [],
+  "inspected_source_files_preserved": 21,
+  "repository_license_files": 2,
+  "download_failure_receipts_preserved": 1,
+  "artifact_hashes_verified": true,
+  "omitted": "Recursive source-discovery repository trees; relevant revision summaries and actual source evidence retained."
+}

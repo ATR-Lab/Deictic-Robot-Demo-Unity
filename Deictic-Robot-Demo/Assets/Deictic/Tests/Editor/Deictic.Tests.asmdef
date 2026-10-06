@@ -1,6 +1,8 @@
 {
   "name": "Deictic.Tests",
-  "references": ["Deictic.Runtime", "Unity.Robotics.ROSTCPConnector", "Unity.Robotics.ROSTCPConnector.Messages", "Unity.Robotics.ROSTCPConnector.MessageGeneration"],
+  "references": ["Deictic.Runtime", "Unity.Robotics.ROSTCPConnector", "Unity.Robotics.ROSTCPConnector.Messages", "Unity.Robotics.ROSTCPConnector.MessageGeneration", "Unity.InputSystem", "Unity.XR.OpenXR", "Oculus.VR"],
+  "overrideReferences": true,
+  "precompiledReferences": ["nunit.framework.dll", "Newtonsoft.Json.dll"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"]
 }

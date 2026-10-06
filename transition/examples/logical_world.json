@@ -1,0 +1,4 @@
+{
+  "read_cue": {"duration": 2.0, "effects": {"remote.cue": "blue"}},
+  "present_reference": {"duration": 1.0, "effects": {"remote.reference_presented": true}}
+}

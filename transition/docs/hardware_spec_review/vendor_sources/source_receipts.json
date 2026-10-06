@@ -1,0 +1,123 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/b1/b1_loco_client.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/b1/b1_loco_client.hpp",
+    "sha256": "a660ad38e363acce1fa938cd570b1418f929aaead2e16f0bf6011f38a9d04a2f"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/b1/b1_api_const.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/b1/b1_api_const.hpp",
+    "sha256": "d4609eb82757ad8cc1e12c763aff4ac69ac017d5dc4e04386ca1b7a460aab612"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/b1/b1_loco_api.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/b1/b1_loco_api.hpp",
+    "sha256": "b470990cc8788dddd5950925e4c82d90cc164c1e0ea116a71da523cc7701798f"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/common/robot_shared.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/common/robot_shared.hpp",
+    "sha256": "744b7f104e5fdb9f7a8b367b61ca00086d60731690d3c973187b110ce6e19931"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/channel/channel_factory.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/channel/channel_factory.hpp",
+    "sha256": "40663146c370dc5b06e2b75c126626a07c0e3827cc92c4cdfce0a01394e7939a"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/b1/arm_controller.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/b1/arm_controller.hpp",
+    "sha256": "056559d341b18f1598e14284cbd66e427478bd73aa133ff375cfc8e43a08c0a6"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/rpc/rpc_client.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/rpc/rpc_client.hpp",
+    "sha256": "d60e8c40f3e81c610ec37f5dea1290dfed0fd9c534618b17638768ee308643ae"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/idl/b1/LowState.h",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/idl/b1/LowState.h",
+    "sha256": "488047b0686167dc03d9dfa834e6a9e940a76e2e465411b5c7618006cb4939fd"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/idl/b1/MotorState.h",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/idl/b1/MotorState.h",
+    "sha256": "f607d7759169f9fb57b7ec1bce5886a5bb9943e1c8d445369206f3fcd6fde4e4"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/booster_ros2_interface/msg/LowState.msg",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/booster_ros2_interface/msg/LowState.msg",
+    "sha256": "0ada3e9ed1da3a0ea1a280854d1c845abcd502f89465b680fac6263bad8c3dda"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/booster_ros2_interface/msg/MotorState.msg",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/booster_ros2_interface/msg/MotorState.msg",
+    "sha256": "1754096c92cb5287701aca4f72edbcc85f5d1a37dea8890f2f5f520225d240d3"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/booster_ros2_interface/msg/RobotStatesMsg.msg",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/booster_ros2_interface/msg/RobotStatesMsg.msg",
+    "sha256": "6d07207f746007b9570bd28fa4b60ae84ce9a32b494f7c837f94b4b626270574"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/booster_ros2_interface/srv/RpcService.srv",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/booster_ros2_interface/srv/RpcService.srv",
+    "sha256": "41c795277cb0d48de5fa389da029899c6d22b61aac858ea4812ccef80f1201c4"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/booster_ros2_example/rpc_client/src/client.py",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/booster_ros2_example/rpc_client/src/client.py",
+    "sha256": "1972cc12e5d6745bdd0b14839cd60d282a0921a1a4c6bfe9b888b1dd52997ebb"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/booster_ros2_example/low_level/src/low_level_subscriber.cpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/booster_ros2_example/low_level/src/low_level_subscriber.cpp",
+    "sha256": "2cb296e9730b4d39b15abf802f0725c314038e89abc404921fbb9efe329b5cd1"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/booster_ros2_interface/package.xml",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/booster_ros2_interface/package.xml",
+    "sha256": "33aa169573997876359c7881791fc5596b0b2816139a4d8fa5ab5a6ae4f10755"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk_ros2/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3/README.md",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk_ros2/README.md",
+    "sha256": "92a3388d72824d6d4dca67e017ea9f9110d5888d8f2d4cc006ec383ac6e93747"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_assets/3c2dfa99e09beddf092e0d6521dbbcec7e7903ed/README.md",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_assets/README.md",
+    "sha256": "02d4105c03c834ad941e4c7851876ba88f8f00b1be7e309816a900925da1a89b"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_assets/3c2dfa99e09beddf092e0d6521dbbcec7e7903ed/robots/K1/K1_22dof.urdf",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_assets/robots/K1/K1_22dof.urdf",
+    "sha256": "834e17faf4681e5fcae116130a9da6d81b696c7f8278b95f281cec0551ca6124"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_assets/3c2dfa99e09beddf092e0d6521dbbcec7e7903ed/robots/K1/motions.py",
+    "error": "HTTP Error 404: Not Found"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/include/booster/robot/common/entities.hpp",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/include/booster/robot/common/entities.hpp",
+    "sha256": "e770b44607f7f1d1a04ac8c55f93ecea59dc02ce2a7c74bf4739e52310601036"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_assets/3c2dfa99e09beddf092e0d6521dbbcec7e7903ed/src/booster_assets/motions.py",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_assets/src/booster_assets/motions.py",
+    "sha256": "89e51e8bdfd8fb881d5b8264853869ce39b19cf0c0c569d74f079f8b6d6d819f"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_robotics_sdk/87a9a26d06a94ddd50968e7576f1170f6fa5a80f/LICENSE",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_robotics_sdk/LICENSE",
+    "sha256": "5dc87c1bb19786b7cc23a47bc48ed6be76694634247e692ca7b40b2be27b677f",
+    "purpose": "repository_license"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/BoosterRobotics/booster_assets/3c2dfa99e09beddf092e0d6521dbbcec7e7903ed/LICENSE",
+    "local": "docs/hardware_spec_review/vendor_sources/booster_assets/LICENSE",
+    "sha256": "056db8cc7dcb21feae042d97185d4689c21bb1ba7fe59cefdc7ef5917c0ea77f",
+    "purpose": "repository_license"
+  }
+]

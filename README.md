@@ -1,10 +1,14 @@
 # Deictic Robot Demo
 
-Mixed-reality reaching and bimanual teleoperation for **Meta Quest 3S** and the **Booster K1**, built with Unity, ROS 2 and Isaac Sim.
+Mixed-reality reaching, bimanual teleoperation and transition-aware task supervision for **Meta Quest 3S** and the **Booster K1**, built with Unity, ROS 2 and Isaac Sim.
 
 The project adapts *Deictic Shared-Autonomy Manipulation via Continuous Markerless Egocentric MR-to-Robot Frame Fusion* to a fixed-base K1. Point at a tabletop target, inspect the planned motion, then execute it. Alternatively, hold both controller triggers to move the robot's arms through pose IK. A world-fixed button switches between the user's view and an immersive, headset-filling stereo view from the robot's head cameras.
 
-**Simulation first:** the rendered-image registration, reaching and scripted teleoperation paths have been exercised against Isaac physics. This repository does not include a physical K1 motor driver or reproduce the paper's participant study.
+**Transition workflow:** the supplied `Transition-deictic-paper` implementation is integrated in [transition/](transition/README.md), with explicit task authority/attention, immutable return snapshots, decision capture and a separate world-fixed Unity panel. Run `powershell -ExecutionPolicy Bypass -File .\scripts\Start-Transition.ps1 -Mode Isaac` for its A/B/home simulation, or `-Mode HardwareObservation` for receive-only physical K1 telemetry. The original manual demo remains available through `Start-Demo.ps1`.
+
+**Simulation first:** the rendered-image registration, reaching and scripted teleoperation paths have been exercised against Isaac physics. Physical task dispatch remains gated on commissioning evidence; the available physical path receives telemetry only. No participant study is reproduced.
+
+**Hardware diagnostics held (24 September 2026):** repeated K1 out-of-memory kills reset vendor services, including the motion process. Our diagnostics are stopped and the camera observer is disabled. Normal hardware launchers are latched off on the installed hosts. See the [incident report](transition/docs/K1_RESET_INCIDENT.md); do not restart hardware observation while this remains unresolved.
 
 [Set up from scratch](docs/setup.md) · [Start the installed demo](docs/start-demo.md) · [Teleoperation controls](docs/arm-teleoperation.md) · [Validation record](docs/validation.md)
 
@@ -18,6 +22,8 @@ The project adapts *Deictic Shared-Autonomy Manipulation via Continuous Markerle
 | Robot camera view | Headset yaw/pitch steer the simulated neck in Robot POV; paired head-camera video fills both eyes; a world-fixed button returns to User view |
 | K1 simulation | Official pinned URDF/meshes, eight movable arm joints plus two neck joints, fixed trunk/legs, measured joint feedback and simulated cameras |
 | Remote operation | Unity ROS TCP traffic over SSH; a separate Isaac WebRTC application stream |
+| Transition-aware supervision | Common task guards, ordinary/consequence-aware schedulers, explicit attention and authority, frozen return leases and audited first decisions |
+| Physical observation | One-way vendor-domain telemetry into isolated ROS domain174, explicit joint mapping, camera provenance and release blockers |
 
 The controller enforces joint/motion limits, conservative geometry checks, input and feedback freshness, and relay ownership acknowledgements. These are simulation controls, not a physical robot safety certification.
 
@@ -30,13 +36,13 @@ git clone https://github.com/ATR-Lab/Deictic-Robot-Demo-Unity.git
 ```
 
 1. Follow the [complete setup guide](docs/setup.md) to install dependencies and configure networking. The tested stack is Unity **6000.6.0f1**, Meta XR **205**, Ubuntu **24.04**, ROS **Jazzy** and Isaac Sim **5.0.0**.
-2. Start the four workstation processes using [the run commands](docs/start-demo.md): Isaac, the trajectory/teleoperation relay, the ROS endpoint/controller/display relay, and learned registration.
-3. Start the Windows SSH tunnel. Connect the Isaac WebRTC client directly to the workstation if you want the simulator application view.
+2. Choose one workflow from Windows: `scripts/Start-Transition.ps1 -Mode Isaac` for the transition task, or `scripts/Start-Demo.ps1` for manual deictic reaching/IK. Each launcher writes the matching startup mode and starts its workstation processes.
+3. Keep the launcher terminal open for its SSH tunnel. The manual launcher also opens the Isaac WebRTC client; its media connection goes directly to the workstation.
 4. Open the nested **`Deictic-Robot-Demo`** Unity project, then `Assets/Scenes/DeicticDemo.unity`. Activate Meta XR Simulator with the Quest 3S profile and enter Play mode. The default Unity endpoint is `127.0.0.1:10000` through the tunnel.
 
 ROS and Isaac run on native Ubuntu; WSL is optional for the [lightweight mock workflow](docs/setup.md#9-optional-wsl-mock-demo). WebRTC media does not pass through the ROS SSH tunnel. The runbook explains ports, readiness, shutdown and recovery.
 
-For the already installed lab stack, run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-Demo.ps1` from the repository root on Windows. It starts the remote services, ROS tunnel and WebRTC viewer while leaving Unity Play mode to you. See [one-command startup and shutdown](docs/start-demo.md#one-command-windows-launcher).
+For the already installed manual teleoperation stack, run `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\Start-Demo.ps1` from the repository root on Windows. It selects manual simulation and starts the remote services, ROS tunnel and WebRTC viewer while leaving Unity Play mode to you. See [one-command startup and shutdown](docs/start-demo.md#one-command-windows-launcher). The checked-in default Unity mode is transition simulation; select the launcher that matches the intended task.
 
 ## Controls
 

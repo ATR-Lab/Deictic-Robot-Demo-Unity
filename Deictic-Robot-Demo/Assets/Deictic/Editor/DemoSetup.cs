@@ -175,6 +175,8 @@ namespace Deictic.Editor
         public static void EnableRos2()
         {
             PlayerSettings.Android.forceInternetPermission = true;
+            // The authenticated operator client accepts loopback URLs only; SSH protects the remote hop.
+            PlayerSettings.insecureHttpOption = InsecureHttpOption.AlwaysAllowed;
             foreach (NamedBuildTarget target in new[] { NamedBuildTarget.Standalone, NamedBuildTarget.Android })
             {
                 var defines = PlayerSettings.GetScriptingDefineSymbols(target).Split(';').Where(x => !string.IsNullOrWhiteSpace(x)).ToList();

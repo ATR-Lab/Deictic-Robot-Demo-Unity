@@ -9,6 +9,11 @@ namespace Deictic
         public string rosHost = "127.0.0.1";
         public int rosPort = 10000;
         public bool connectOnStart = true;
+        [Tooltip("Chosen at startup. Manual simulation and transition autonomy never share command ownership. Hardware observation disables all legacy motion publishers.")]
+        public DeicticControlMode controlMode = DeicticControlMode.ManualSimulation;
+        [Tooltip("Loopback HTTP endpoint forwarded through SSH from the transition runtime.")]
+        public string transitionOperatorUrl = "http://127.0.0.1:8766";
+        public Vector3 transitionPanelWorldPosition = new Vector3(-.82f, 1.25f, 1.4f);
         public bool syntheticScene = true;
         [Tooltip("Enable only on device with camera permission and captured room geometry.")]
         public bool publishHeadsetCamera = false;

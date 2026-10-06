@@ -37,6 +37,13 @@ terms. Pretrained weights and Python environments are not distributed here.
 
 ## Research and implementation references
 
+- The user-supplied `Transition-deictic-paper` implementation, specifications,
+  tests and configurations are incorporated under `transition/` for this integration.
+  [REFERENCE_SOURCE.json](transition/REFERENCE_SOURCE.json) records source hashes.
+  Its research PDF archive, generated run evidence and compiled artifacts are not
+  included. No new license grant is inferred for supplied material. New integration
+  and physical limitations are described in [transition/README.md](transition/README.md).
+
 - The user-supplied paper is described in [the paper review](docs/paper-review.md).
   The supplied manuscript and Reachy demo archive are not redistributed.
 - [Unitree xr_teleoperate](https://github.com/unitreerobotics/xr_teleoperate/tree/817fb00c63cde15e5f24a0f8fa08e1e33ed89d3b)

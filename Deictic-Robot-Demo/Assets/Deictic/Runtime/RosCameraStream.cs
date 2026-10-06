@@ -13,6 +13,7 @@ namespace Deictic
     {
         public const string RawTopic = "/deictic/camera_view/stereo/image_raw";
         public const string DefaultTopic = RawTopic + "/compressed";
+        public const string HardwareMonoTopic = "/transition/hardware/head/image_raw/compressed";
         readonly object pendingLock = new object();
         ROSConnection ros;
         string topic = DefaultTopic;
@@ -32,19 +33,26 @@ namespace Deictic
         double displayedStamp = double.NegativeInfinity;
         string lastError = "";
         long received, displayed, dropped, rejected;
+        int displayClockEpoch;
 
         public Texture2D Texture => texture;
         public bool IsStereo { get; private set; }
         public bool IsCompressed { get; private set; }
+        public bool DiagnosticReceiptOnly { get; private set; }
+        public TransitionDisplayClock DisplayClock { get; private set; }
         // Raw ROS pixels have row zero at texture y=0. Unity's JPEG decoder
         // produces its normal bottom-left texture layout, so it needs no flip.
         public bool TopRowAtTextureYZero { get; private set; } = true;
         public float EyeAspectRatio => texture == null ? 4f / 3f : (float)texture.width / ((IsStereo ? 2 : 1) * texture.height);
         public double FrameAge => double.IsNegativeInfinity(displayedStamp)
-            ? double.PositiveInfinity : Math.Max(0, RosFrames.Now - displayedStamp);
+            ? double.PositiveInfinity : Math.Max(0, CameraNow - displayedStamp);
+        double CameraNow => DiagnosticReceiptOnly ? Time.realtimeSinceStartupAsDouble : DisplayClock != null ?
+            RosFrames.LocalNow + DisplayClock.OffsetSeconds : RosFrames.Now;
+        bool DisplayClockReady => DisplayClock == null || DisplayClock.IsReady(RosFrames.LocalNow, Time.realtimeSinceStartupAsDouble);
         public bool HasFreshFrame => isActiveAndEnabled && subscribed && texture != null &&
             ros != null && ros.HasConnectionThread && !ros.HasConnectionError &&
-            RosFrames.Now - displayedStamp >= -.25 && FrameAge <= timeout;
+            DisplayClockReady && (DisplayClock == null || displayClockEpoch == DisplayClock.Epoch) &&
+            CameraNow - displayedStamp >= -.25 && FrameAge <= timeout;
         public string LastError => lastError;
         public long ReceivedFrames => Interlocked.Read(ref received);
         public long DisplayedFrames => Interlocked.Read(ref displayed);
@@ -57,27 +65,45 @@ namespace Deictic
                 if (!isActiveAndEnabled) return "Robot camera paused";
                 if (ros == null) return "Camera stream not initialized";
                 if (!ros.HasConnectionThread || ros.HasConnectionError) return "Waiting for ROS camera connection";
+                if (!DisplayClockReady) return "Waiting for bounded simulator display clock · no task authority implied";
                 if (!string.IsNullOrEmpty(lastError)) return lastError;
                 if (texture == null || double.IsPositiveInfinity(FrameAge)) return "Waiting for robot camera frame";
+                if (DiagnosticReceiptOnly) return HasFreshFrame ?
+                    $"K1 mono diagnostic · received {FrameAge:F2}s ago · capture freshness unverified" : "K1 diagnostic camera receipt timeout";
+                if (DisplayClock != null && HasFreshFrame) return
+                    $"Simulator camera · {FrameAge:F2}s old · display clock uncertainty ≤{DisplayClock.UncertaintySeconds * 1000:F0}ms";
                 return HasFreshFrame ? $"Robot camera {texture.width}×{texture.height} · {FrameAge:F2}s old"
                     : $"Robot camera frame stale · {FrameAge:F2}s old";
             }
         }
 
-        public void Initialize(ROSConnection connection, string imageTopic = DefaultTopic, float timeout = 1f, bool stereoSideBySide = false)
+        public void Initialize(ROSConnection connection, string imageTopic = DefaultTopic, float timeout = 1f, bool stereoSideBySide = false,
+            bool diagnosticReceiptOnly = false)
         {
             if (connection == null) throw new ArgumentNullException(nameof(connection));
             if (string.IsNullOrWhiteSpace(imageTopic)) throw new ArgumentException("A camera topic is required", nameof(imageTopic));
             if (!float.IsFinite(timeout) || timeout <= 0) throw new ArgumentOutOfRangeException(nameof(timeout));
+            if (diagnosticReceiptOnly && (imageTopic != HardwareMonoTopic || stereoSideBySide))
+                throw new ArgumentException("Diagnostic receipt timing requires the dedicated hardware mono topic");
             Unsubscribe();
             ros = connection; topic = imageTopic; this.timeout = timeout;
             IsStereo = stereoSideBySide;
+            DiagnosticReceiptOnly = diagnosticReceiptOnly;
             IsCompressed = topic.EndsWith("/compressed", StringComparison.Ordinal);
             if (isActiveAndEnabled) Subscribe();
         }
 
         void OnEnable() { if (ros != null) Subscribe(); }
         void OnDisable() => Unsubscribe();
+
+        public void UseDisplayClock(TransitionDisplayClock clock)
+        {
+            if (DiagnosticReceiptOnly) throw new InvalidOperationException("Hardware diagnostics use receipt timing, never a simulation clock");
+            DisplayClock = clock ?? throw new ArgumentNullException(nameof(clock));
+            displayClockEpoch = DisplayClock.Epoch;
+            lock (pendingLock) { pending = null; newestStamp = double.NegativeInfinity; }
+            displayedStamp = double.NegativeInfinity;
+        }
 
         void Subscribe()
         {
@@ -105,6 +131,7 @@ namespace Deictic
 
         void Receive(ImageMsg message)
         {
+            CheckDisplayClockEpoch();
             // Connector 0.7 dispatches from Update. A lock also makes a future
             // threaded dispatcher safe; texture APIs are used only in Update.
             Interlocked.Increment(ref received);
@@ -128,9 +155,13 @@ namespace Deictic
 
         void ReceiveCompressed(CompressedImageMsg message)
         {
+            CheckDisplayClockEpoch();
             Interlocked.Increment(ref received);
             if (!TryStamp(message?.header, out double stamp)) return;
-            if (!RosJpegPacking.TryValidate(message, IsStereo, out int width, out int height, out string error))
+            int width, height; string error;
+            bool valid = DiagnosticReceiptOnly ? RosJpegPacking.TryValidateHardwareDiagnostic(message, out width, out height, out error) :
+                RosJpegPacking.TryValidate(message, IsStereo, out width, out height, out error);
+            if (!valid)
             {
                 Interlocked.Increment(ref rejected);
                 lastError = error;
@@ -149,6 +180,9 @@ namespace Deictic
                 return false;
             }
             stamp = header.stamp.sec + header.stamp.nanosec * 1e-9;
+            // Hardware vendor stamps have no certified acquisition/clock mapping. This
+            // observer reports only receipt age and never feeds task evidence or control.
+            if (DiagnosticReceiptOnly) { stamp = Time.realtimeSinceStartupAsDouble; return true; }
             if (stamp > 0 && Fresh(stamp)) return true;
             Interlocked.Increment(ref rejected);
             lastError = "Robot camera timestamp stale or clocks unsynchronized";
@@ -157,8 +191,15 @@ namespace Deictic
 
         bool Fresh(double stamp)
         {
-            double age = RosFrames.Now - stamp;
-            return double.IsFinite(age) && age >= -.25 && age <= timeout;
+            double age = CameraNow - stamp;
+            return DisplayClockReady && double.IsFinite(age) && age >= -.25 && age <= timeout;
+        }
+
+        void CheckDisplayClockEpoch()
+        {
+            if (DisplayClock == null || displayClockEpoch == DisplayClock.Epoch) return;
+            lock (pendingLock) { pending = null; newestStamp = double.NegativeInfinity; }
+            displayedStamp = double.NegativeInfinity; displayClockEpoch = DisplayClock.Epoch;
         }
 
         void Queue(Frame frame)
@@ -178,6 +219,7 @@ namespace Deictic
 
         void Update()
         {
+            CheckDisplayClockEpoch();
             // Run after the Connector Update and before the POV material update.
             // No display poll delay: decode only the newest queued frame once.
             if (!subscribed) return;
@@ -259,6 +301,13 @@ namespace Deictic
     {
         public const int MaxPayloadBytes = 512 * 1024;
         public const string Format = "rgb8; jpeg compressed bgr8";
+        public static bool TryValidateHardwareDiagnostic(CompressedImageMsg image, out int width, out int height, out string error)
+        {
+            width = height = 0;
+            error = "Expected the K1 diagnostic head colour optical frame";
+            if (image?.header?.frame_id != "head_color_optical_frame") return false;
+            return TryValidate(image, false, out width, out height, out error);
+        }
 
         public static bool TryValidate(CompressedImageMsg image, bool stereo,
             out int width, out int height, out string error)

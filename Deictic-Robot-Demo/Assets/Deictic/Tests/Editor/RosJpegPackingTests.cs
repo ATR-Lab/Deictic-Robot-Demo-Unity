@@ -27,6 +27,18 @@ public sealed class RosJpegPackingTests
         Assert.That(height, Is.EqualTo(360));
     }
 
+    [Test]
+    public void HardwareMonoDiagnosticNeedsItsOwnFrameAndCannotPassAsStereo()
+    {
+        var frame = Frame(544, 306);
+        frame.header.frame_id = "head_color_optical_frame";
+        Assert.That(RosJpegPacking.TryValidateHardwareDiagnostic(frame, out int width, out int height, out _), Is.True);
+        Assert.That(width, Is.EqualTo(544)); Assert.That(height, Is.EqualTo(306));
+        Assert.That(RosJpegPacking.TryValidate(frame, true, out _, out _, out _), Is.False);
+        frame.header.frame_id = "wrist_camera_optical";
+        Assert.That(RosJpegPacking.TryValidateHardwareDiagnostic(frame, out _, out _, out _), Is.False);
+    }
+
     [TestCase("oversize_width")]
     [TestCase("oversize_height")]
     [TestCase("odd_width")]

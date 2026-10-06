@@ -1,0 +1,65 @@
+[
+  {
+    "repo": "booster_robotics_sdk",
+    "sha": "87a9a26d06a94ddd50968e7576f1170f6fa5a80f",
+    "committed_at": "2026-09-15T12:17:50Z",
+    "commit_url": "https://github.com/BoosterRobotics/booster_robotics_sdk/commit/87a9a26d06a94ddd50968e7576f1170f6fa5a80f",
+    "paths": [
+      "README.md",
+      "include/booster/idl/audio/AudioCaptureFrameTopic.h",
+      "include/booster/robot/b1/b1_api_const.hpp",
+      "include/booster/robot/b1/b1_loco_client.hpp",
+      "include/booster/robot/common/robot_shared.hpp",
+      "include/booster/robot/x5_camera/x5_camera_api_const.hpp",
+      "include/booster_fastdds/fastdds/statistics/monitorservice_types.idl",
+      "include/booster_fastdds/fastdds/statistics/types.idl",
+      "include/booster_fastdds/fastrtps/types/dds-builtin_types.idl",
+      "include/booster_fastdds/fastrtps/types/dds-language_binding.idl",
+      "include/booster_fastdds/fastrtps/types/dds-xtypes_discovery.idl",
+      "include/booster_fastdds/fastrtps/types/dds-xtypes_typeobject.idl"
+    ]
+  },
+  {
+    "repo": "booster_robotics_sdk_ros2",
+    "sha": "5f9182e1a1b704f65e0065c83a3b6be2d066f3b3",
+    "committed_at": "2025-11-14T07:46:22Z",
+    "commit_url": "https://github.com/BoosterRobotics/booster_robotics_sdk_ros2/commit/5f9182e1a1b704f65e0065c83a3b6be2d066f3b3",
+    "paths": [
+      "README.cn.md",
+      "README.md",
+      "booster_ros2_interface/README.md",
+      "booster_ros2_interface/msg/BoosterApiReqMsg.msg",
+      "booster_ros2_interface/msg/BoosterApiRespMsg.msg",
+      "booster_ros2_interface/msg/ButtonEventMsg.msg",
+      "booster_ros2_interface/msg/FallDownState.msg",
+      "booster_ros2_interface/msg/HandActionStatus.msg",
+      "booster_ros2_interface/msg/HandCommand.msg",
+      "booster_ros2_interface/msg/HandDdsMsg.msg",
+      "booster_ros2_interface/msg/HandParam.msg",
+      "booster_ros2_interface/msg/ImuState.msg",
+      "booster_ros2_interface/msg/LowCmd.msg",
+      "booster_ros2_interface/msg/LowState.msg",
+      "booster_ros2_interface/msg/MotorCmd.msg",
+      "booster_ros2_interface/msg/MotorState.msg",
+      "booster_ros2_interface/msg/Odometer.msg",
+      "booster_ros2_interface/msg/ProneBodyControlStatus.msg",
+      "booster_ros2_interface/msg/RawBytesMsg.msg",
+      "booster_ros2_interface/msg/RemoteControllerState.msg",
+      "booster_ros2_interface/msg/RobotReplayTrajID.msg",
+      "booster_ros2_interface/msg/RobotStatesMsg.msg",
+      "booster_ros2_interface/msg/Subtitle.msg"
+    ]
+  },
+  {
+    "repo": "booster_assets",
+    "sha": "3c2dfa99e09beddf092e0d6521dbbcec7e7903ed",
+    "committed_at": "2026-09-03T12:25:45Z",
+    "commit_url": "https://github.com/BoosterRobotics/booster_assets/commit/3c2dfa99e09beddf092e0d6521dbbcec7e7903ed",
+    "paths": [
+      "README.md",
+      "robots/K1/K1_22dof.urdf",
+      "robots/K1/K1_22dof.xml",
+      "robots/K1/K1_22dof_parallel.xml"
+    ]
+  }
+]

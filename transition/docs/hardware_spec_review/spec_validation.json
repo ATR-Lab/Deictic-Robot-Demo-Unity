@@ -1,0 +1,81 @@
+{
+  "checked_at_utc": "2026-09-23T17:52:35.442439+00:00",
+  "specification": "docs/HARDWARE_IMPLEMENTATION_SPEC.md",
+  "sha256": "e95d23b5c2c5e70405654bc3d1bc341ae3c0558357be109e3de911944db123c1",
+  "word_count": 9051,
+  "line_count": 604,
+  "local_links_checked": 78,
+  "broken_local_links": [],
+  "fenced_code_checks": [
+    {
+      "language": "yaml",
+      "check": "Ruby YAML.safe_load; disabled and empty profiles verified",
+      "passed": true
+    },
+    {
+      "language": "python",
+      "check": "ast.parse",
+      "passed": true
+    },
+    {
+      "language": "sh",
+      "check": "bash -n; not executed",
+      "passed": true
+    },
+    {
+      "language": "sh",
+      "check": "bash -n; not executed",
+      "passed": true
+    },
+    {
+      "language": "sh",
+      "check": "bash -n; not executed",
+      "passed": true
+    },
+    {
+      "language": "sh",
+      "check": "bash -n; not executed",
+      "passed": true
+    },
+    {
+      "language": "sh",
+      "check": "bash -n; not executed",
+      "passed": true
+    }
+  ],
+  "release_blocker_ids": 13,
+  "acceptance_test_ids": 23,
+  "stages": 8,
+  "runtime_and_regression_sources_match_previous_133_test_receipt": {
+    "src/transition_autonomy/runtime.py": true,
+    "tests/test_runtime_review.py": true
+  },
+  "new_test_execution": "No production code changes or unit-suite rerun; isolated fake-transport stop probe recorded in adapter audit.",
+  "hardware_or_simulator_execution_this_task": false,
+  "source_snapshot_sha256": {
+    "src/transition_autonomy/web.py": "cb3dd1528d0bd60b8a1fe00a720a27797124ccbf179329df3275c845163a0e5b",
+    "src/transition_autonomy/journal.py": "c3a60f4371f7a30fcd343f67f4780618875bdc24404d3f98efc499b4f67a7c8d",
+    "src/transition_autonomy/scoring.py": "d672b296eecf675f2932218266569b040d7de1f1150b4886e407aaf2e222604f",
+    "src/transition_autonomy/__init__.py": "55968b37e86ea1afdec7690432648f7dff83f8a61cc2bfa2b056f804a1b646c7",
+    "src/transition_autonomy/runtime.py": "304de4871e6a69f8fa3a3346d25bdf16c7e5868e85a259808c2ae14038a127e2",
+    "src/transition_autonomy/model.py": "f18c0f92237e2e91732fbf99bcb4eb6f04e29ba1c6be56d62d2f8564a9eace74",
+    "src/transition_autonomy/cli.py": "de7c5fcd361ef759947a27edfc089c1819ca1c51e112f591f356842957d37522",
+    "src/transition_autonomy/scheduler.py": "e6af0be9dd87de5bf2bdba9cc9d92f2d8f8d5040ddeb6a2338c9f4089e8afd18",
+    "src/transition_autonomy/backends/booster_backend.py": "4947b95a1e8f521aa9b70a7cd0f679e82e1f0370429a48dcd8f19c2c1da1bd57",
+    "src/transition_autonomy/backends/logical.py": "80c59b9f9192a238daf27278830c62154bb2182e23e64ad7787ff2603cc8e6d7",
+    "src/transition_autonomy/backends/__init__.py": "74130d36b070aeeb84428a982439c81c23fbed685d7d4cb4b5adc320e3e4d296",
+    "src/transition_autonomy/backends/isaac_backend.py": "bf5545620b81a4d20230cf059dad6a8a4693d89dd74fbf6cb4743e4294fabb69",
+    "src/transition_autonomy/backends/base.py": "adca992283d45538fb42b66e62ec1607d0158bb341e45cd09c510b46ec718bd3",
+    "scripts/fetch_k1_assets.py": "1b6333bf2da559e82d463587e6dbe0fbebafc3e88b4d083864f2d1dbc0b62dc7",
+    "scripts/validate_isaac.py": "a664b9d280161b82662d5adb24677d5b514dd4d73b4e628768a507f303e71d96",
+    "scripts/validate_runtime_isaac.py": "187b346febb340aebe00770978c2cf0655e8580c474148cffa7bd8f758df65a4",
+    "deployment/ros2_gateway.py": "095fca6b1868862e8a37a4d33a6d7fd64595ba225739796fc0c2b6103c25b83d",
+    "deployment/test_ros2_roundtrip.py": "e244231e8325d6c069a5d6c2ca00c7b6f17aae328af7430fa410b8d669c44ce0",
+    "deployment/isaac_state.py": "8731991d61dd30af2bfa9878cfce9e7d495c9ff9dac63067fdb717594a682bcb",
+    "deployment/isaac_worker.py": "2095b20cf688bb68dab00de5d67b4068f4c9a1f5fee069cd4fbea29be27964a8",
+    "examples/k1_pointing.json": "df6cd930a0c5a7c557e0f991bc51ab4c467ad510a889ac56c82827470f16eb03",
+    "config/isaac_k1.json": "d42d24eac4aa95764fc0fc54266806cd8d599f16286f6838c561f3fe0cf44edf"
+  },
+  "review_resolution": "REVIEW_RESOLUTION.md",
+  "scope": "Document structure, syntax, source identity and review traceability; not hardware readiness."
+}

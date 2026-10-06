@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "stage": "S1",
+  "permit_class": "simulation",
+  "scope": "native_simulation",
+  "run_started": false,
+  "planned_count": 1,
+  "attempted_count": 0,
+  "refused_count": 0,
+  "attempts": [],
+  "refusals": [],
+  "artifacts": {
+    "lifecycle": {
+      "path": "transition/.runtime/reports-final-20260924/lifecycle.json",
+      "role": "evidence",
+      "required": true
+    },
+    "ordinary": {
+      "path": "transition/.runtime/reports-final-20260924/runtime-ordinary/report.json",
+      "role": "evidence",
+      "required": true
+    },
+    "consequence": {
+      "path": "transition/.runtime/reports-final-20260924/runtime-consequence/report.json",
+      "role": "evidence",
+      "required": true
+    },
+    "ordinary_events": {
+      "path": "transition/.runtime/reports-final-20260924/runtime-ordinary/events.jsonl",
+      "role": "evidence",
+      "required": true
+    },
+    "consequence_events": {
+      "path": "transition/.runtime/reports-final-20260924/runtime-consequence/events.jsonl",
+      "role": "evidence",
+      "required": true
+    },
+    "ros_telemetry": {
+      "path": "transition/.runtime/reports-final-20260924/ros-telemetry.json",
+      "role": "evidence",
+      "required": true
+    },
+    "source_manifest": {
+      "path": "transition/.runtime/reports-final-20260924/source-manifest.json",
+      "role": "evidence",
+      "required": true
+    },
+    "worker": {
+      "path": "transition/deployment/isaac_worker.py",
+      "role": "source",
+      "required": true,
+      "sha256": "54c32404e08f4237bf56294c062eb8884a107ac65a37128dc5a69f3645ab9a49"
+    },
+    "worker_state": {
+      "path": "transition/deployment/isaac_state.py",
+      "role": "source",
+      "required": true,
+      "sha256": "8731991d61dd30af2bfa9878cfce9e7d495c9ff9dac63067fdb717594a682bcb"
+    },
+    "telemetry_source": {
+      "path": "transition/deployment/isaac_telemetry.py",
+      "role": "source",
+      "required": true,
+      "sha256": "63144db989697d68804f4bbbc5aa670cbb814245456ff488040c3eeeca4e03a7"
+    },
+    "runtime_source": {
+      "path": "transition/src/transition_autonomy/runtime.py",
+      "role": "source",
+      "required": true,
+      "sha256": "5da6b19775ae6525ec468a88c6c10cb9d7d36565c556e11413e6968e3468c116"
+    },
+    "isaac_adapter": {
+      "path": "transition/src/transition_autonomy/backends/isaac_backend.py",
+      "role": "source",
+      "required": true,
+      "sha256": "bf5545620b81a4d20230cf059dad6a8a4693d89dd74fbf6cb4743e4294fabb69"
+    },
+    "scheduler_source": {
+      "path": "transition/src/transition_autonomy/scheduler.py",
+      "role": "source",
+      "required": true,
+      "sha256": "e6af0be9dd87de5bf2bdba9cc9d92f2d8f8d5040ddeb6a2338c9f4089e8afd18"
+    },
+    "journal_source": {
+      "path": "transition/src/transition_autonomy/journal.py",
+      "role": "source",
+      "required": true,
+      "sha256": "c3a60f4371f7a30fcd343f67f4780618875bdc24404d3f98efc499b4f67a7c8d"
+    },
+    "lifecycle_validator": {
+      "path": "transition/scripts/validate_isaac.py",
+      "role": "source",
+      "required": true,
+      "sha256": "3d8b13c7035669b9e322cb755ce19d4815e824c7de98b2598168274d7c5ec18b"
+    },
+    "runtime_validator": {
+      "path": "transition/scripts/validate_runtime_isaac.py",
+      "role": "source",
+      "required": true,
+      "sha256": "2c06fee447784d24b611a4d5df22127e169434a10c26d8ae52487219f5055034"
+    },
+    "head_stereo_source": {
+      "path": "sim/head_stereo.py",
+      "role": "source",
+      "required": true,
+      "sha256": "d594d2a96f2f619585824dc77dfd6db66cf228f89b064be8a060b50f1972302d"
+    },
+    "camera_sync_source": {
+      "path": "sim/camera_sync.py",
+      "role": "source",
+      "required": true,
+      "sha256": "ec5042372ebf8e6d729c617649d78bd2d211864062f8afd6fc18a43df53c113f"
+    },
+    "task": {
+      "path": "transition/examples/k1_pointing.json",
+      "role": "configuration",
+      "required": true,
+      "sha256": "df6cd930a0c5a7c557e0f991bc51ab4c467ad510a889ac56c82827470f16eb03"
+    },
+    "profiles": {
+      "path": "transition/config/isaac_k1.json",
+      "role": "configuration",
+      "required": true,
+      "sha256": "d42d24eac4aa95764fc0fc54266806cd8d599f16286f6838c561f3fe0cf44edf"
+    }
+  },
+  "predicates": {
+    "native_profiles": {
+      "status": "not_run",
+      "criterion": "All lifecycle A/B/home commands complete with measured target/joint error within the unchanged configured bounds.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "advancing_sample_dwell": {
+      "status": "not_run",
+      "criterion": "Every completed profile reports advancing physics-time settling at least config settle_seconds; repeated cached samples do not credit dwell.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "duplicate_suppression": {
+      "status": "not_run",
+      "criterion": "Identical native command ID returns retained status without a second dispatch.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "stop_confirmation": {
+      "status": "not_run",
+      "criterion": "Native task stop produces canceled only after measured settled hold, leaving target unknown.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "lost_response_reconciliation": {
+      "status": "not_run",
+      "criterion": "Injected lost reply produces unknown/disconnected state and reconciles the original ID without replay.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "runtime_decisions": {
+      "status": "not_run",
+      "criterion": "Both ordinary and consequence runtime reports pass A/B/home with three raw scripted decisions and explicit local selections; sequential task policies may coincide.",
+      "evidence_refs": [
+        "ordinary",
+        "consequence",
+        "ordinary_events",
+        "consequence_events"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "journal_integrity": {
+      "status": "not_run",
+      "criterion": "Both runtime report journal_integrity.valid values are true and their exported events are retained.",
+      "evidence_refs": [
+        "ordinary",
+        "consequence",
+        "ordinary_events",
+        "consequence_events"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "ros_camera_delivery": {
+      "status": "not_run",
+      "criterion": "After worker readiness, ROS probe receives four measured right-arm joint names plus actual matched-stamp stereo camera frames with nonempty varied pixels and source provenance.",
+      "evidence_refs": [
+        "ros_telemetry"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    },
+    "exact_release_source_match": {
+      "status": "not_run",
+      "criterion": "Pre-run source manifest identifies the executed worker/runtime/task/profile/shared camera revisions, matching the frozen source and configuration artifact digests in this plan.",
+      "evidence_refs": [
+        "source_manifest",
+        "worker",
+        "worker_state",
+        "telemetry_source",
+        "runtime_source",
+        "isaac_adapter",
+        "scheduler_source",
+        "journal_source",
+        "lifecycle_validator",
+        "runtime_validator",
+        "head_stereo_source",
+        "camera_sync_source",
+        "task",
+        "profiles"
+      ],
+      "reason": "Prospectively declared verification; execution and evidence inspection pending.",
+      "disposition": "No automatic advancement or physical motion authorization."
+    }
+  },
+  "final_state": {
+    "motion_state": "not_applicable",
+    "task_outcome": "not_applicable",
+    "arm_state": "not_applicable",
+    "disposition": "Campaign has not run. Preserve prior failed diagnostic attempts separately."
+  },
+  "notes": [
+    "Declared September24 before final candidate execution: exactly one trial consists of native lifecycle validation, complete ordinary runtime, complete consequence runtime and receive-only ROS camera/joint delivery verification.",
+    "Use the monorepo as --artifact-root. Evidence paths are under transition/.runtime/reports-final-20260924.",
+    "Reserve writable evidence destinations before the first simulated motion. Stop and retain the one trial if a constituent check fails; do not repeat under this plan.",
+    "Run only one HTTP command producer at a time. Receive-only camera telemetry may run concurrently. No physical K1 motion or human participant data.",
+    "After execution author a separate result plan retaining this predeclared planned_count and criteria, actual attempt outcome and all evidence; do not overwrite this prospective plan."
+  ]
+}

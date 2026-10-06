@@ -1,0 +1,3 @@
+# Only the previously inspected Linux x86_64 / CPython 3.12 artifact.
+# Install in a separate workstation venv with --no-deps --require-hashes.
+booster_robotics_sdk_python @ https://files.pythonhosted.org/packages/b7/66/f3a92eca4057b673def81ec2749fadb015c57536114909fb2db5ce1f50e5/booster_robotics_sdk_python-1.6.3-cp312-cp312-manylinux_2_34_x86_64.whl --hash=sha256:144d50f13ddbe31de56f508df615d070352eebb2ca439be8f6f3723d98067ebe

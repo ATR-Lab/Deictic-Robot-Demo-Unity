@@ -53,7 +53,9 @@ namespace Deictic
             }
             Stream = gameObject.AddComponent<RosCameraStream>();
             Stream.enabled = false;
-            Stream.Initialize(connection.Ros, connection.settings.robotCameraTopic, connection.settings.robotCameraTimeout, stereo);
+            bool diagnosticMono = connection.settings.controlMode == DeicticControlMode.HardwareObservation &&
+                connection.settings.robotCameraTopic == RosCameraStream.HardwareMonoTopic && !stereo;
+            Stream.Initialize(connection.Ros, connection.settings.robotCameraTopic, connection.settings.robotCameraTimeout, stereo, diagnosticMono);
             canvasRoot = new GameObject("Camera view controls", typeof(RectTransform), typeof(Canvas));
             canvasRoot.layer = RobotUiLayer;
             // Like the Interaction SDK's scene canvases, this has a stable world
@@ -164,7 +166,11 @@ namespace Deictic
             ImmersiveMaterial.SetFloat("_RosTopLeft", Stream.TopRowAtTextureYZero ? 1 : 0);
             StatusText.color = fresh ? new Color(.5f, 1, .8f) : new Color(1, .72f, .3f);
             StatusText.text = Stream.Status;
-            instructions.text = bridge != null && bridge.TeleopControlsBusy ?
+            instructions.text = bridge != null && bridge.settings.controlMode == DeicticControlMode.HardwareObservation ?
+                "Hardware observation only · View switch changes presentation · No motion or stop commands" :
+                bridge != null && !bridge.DirectCommandsAllowed ?
+                "Transition task panel owns control · View switch changes presentation only · B / Esc requests task stop" :
+                bridge != null && bridge.TeleopControlsBusy ?
                 "BIMANUAL CLUTCH · release either trigger to hold both arms · B / Esc stops" :
                 "Both triggers: arm control · User view: target selection · B / Esc cancels";
         }

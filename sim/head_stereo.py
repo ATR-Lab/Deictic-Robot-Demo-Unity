@@ -152,13 +152,13 @@ class StereoSchedule:
 class HeadStereoDisplay:
     """Own only the head display cameras/products; imports Isaac after app startup."""
     def __init__(self, stage, output, node, configure_camera, intrinsics,
-                 baseline_m=0.064, width=320, rate_hz=MAX_RATE_HZ):
+                 baseline_m=0.064, width=320, rate_hz=MAX_RATE_HZ, urdf=URDF):
         import omni.replicator.core as rep
         from pxr import UsdGeom, UsdPhysics
         from isaacsim.sensors.camera import Camera
         from isaacsim.core.utils.rotations import rot_matrix_to_quat
 
-        self.spec = stereo_mount(baseline_m, width, rate_hz=rate_hz)
+        self.spec = stereo_mount(baseline_m, width, urdf=urdf, rate_hz=rate_hz)
         self.output, self.node, self.intrinsics = Path(output), node, intrinsics
         self.schedule = StereoSchedule(rate_hz)
         self.cameras, self.products, self.publishers = {}, {}, {}

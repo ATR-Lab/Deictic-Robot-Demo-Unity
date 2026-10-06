@@ -42,6 +42,7 @@ namespace Deictic
     public sealed class DeicticBridge : MonoBehaviour
     {
         public DeicticSettings settings;
+        public bool DirectCommandsAllowed { get; private set; }
         public ROSConnection Ros { get; private set; }
         public AlignmentStatus Status { get; private set; }
         public Matrix4x4 BaseFromWorld { get; private set; } = Matrix4x4.identity;
@@ -76,37 +77,46 @@ namespace Deictic
         bool headTrackingValid = true;
         bool applicationWasPaused;
         double trackingInvalidatedLocalTime = double.NegativeInfinity;
-        public bool CanCommit => clockSynchronized && Time.realtimeSinceStartup - lastClockReply < 15 &&
+        public bool CanCommit => DirectCommandsAllowed && clockSynchronized && Time.realtimeSinceStartup - lastClockReply < 15 &&
             headTrackingValid && HasAlignment && Status != null && Status.can_commit &&
             Status.confidence >= settings.minimumConfidence && Time.realtimeSinceStartup - statusTime < settings.statusTimeout &&
             Ros != null && Ros.HasConnectionThread && !Ros.HasConnectionError;
-        public bool CanTeleoperate => clockSynchronized && Time.realtimeSinceStartup - lastClockReply < 15 &&
+        public bool CanTeleoperate => DirectCommandsAllowed && clockSynchronized && Time.realtimeSinceStartup - lastClockReply < 15 &&
             TeleopProtocolCompatible && Status.teleop_ready && Status.teleop_relay_ready &&
             Time.realtimeSinceStartup - statusTime < settings.statusTimeout &&
             Ros != null && Ros.HasConnectionThread && !Ros.HasConnectionError;
-        public bool CanTrackRobotHead => clockSynchronized && Time.realtimeSinceStartup - lastClockReply < 15 &&
+        public bool CanTrackRobotHead => DirectCommandsAllowed && clockSynchronized && Time.realtimeSinceStartup - lastClockReply < 15 &&
             Ros != null && Ros.HasConnectionThread && !Ros.HasConnectionError;
 
         public void Initialize(DeicticSettings config)
         {
             settings = config;
+            // Capture once. Inspector edits or a late config file cannot change this run's ownership.
+            DirectCommandsAllowed = config.controlMode == DeicticControlMode.ManualSimulation;
             headTrackingValid = config.syntheticScene;
             Ros = ROSConnection.GetOrCreateInstance();
             Ros.ConnectOnStart = false;
             Ros.RosIPAddress = config.rosHost;
             Ros.RosPort = config.rosPort;
-            Ros.RegisterPublisher<PoseStampedMsg>("/deictic/headset_pose");
-            Ros.RegisterPublisher<PoseStampedMsg>("/deictic/goal");
-            Ros.RegisterPublisher<EmptyMsg>("/deictic/cancel");
-            Ros.RegisterPublisher<StringMsg>("/deictic/execute_request");
-            Ros.RegisterPublisher<StringMsg>("/deictic/registration_failure");
-            Ros.RegisterPublisher<StringMsg>("/deictic/teleop/input", queue_size: 1, latch: false);
-            Ros.RegisterPublisher<StringMsg>("/k1/head/command", queue_size: 1, latch: false);
-            Ros.RegisterPublisher<Float64Msg>("/deictic/time_sync/request");
-            Ros.Subscribe<Float64MultiArrayMsg>("/deictic/time_sync/reply", OnClockReply);
-            Ros.Subscribe<StringMsg>("/deictic/status", OnStatus);
+            if (DirectCommandsAllowed)
+            {
+                Ros.RegisterPublisher<PoseStampedMsg>("/deictic/headset_pose");
+                Ros.RegisterPublisher<PoseStampedMsg>("/deictic/goal");
+                Ros.RegisterPublisher<EmptyMsg>("/deictic/cancel");
+                Ros.RegisterPublisher<StringMsg>("/deictic/execute_request");
+                Ros.RegisterPublisher<StringMsg>("/deictic/registration_failure");
+                Ros.RegisterPublisher<StringMsg>("/deictic/teleop/input", queue_size: 1, latch: false);
+                Ros.RegisterPublisher<StringMsg>("/k1/head/command", queue_size: 1, latch: false);
+                Ros.RegisterPublisher<Float64Msg>("/deictic/time_sync/request");
+                Ros.Subscribe<Float64MultiArrayMsg>("/deictic/time_sync/reply", OnClockReply);
+                Ros.Subscribe<StringMsg>("/deictic/status", OnStatus);
+                Ros.Subscribe<JointTrajectoryMsg>("/deictic/preview", OnPreview);
+            }
+            else
+            {
+                Feedback = "Transition task owns commands; legacy arm and head control disabled";
+            }
             Ros.Subscribe<JointStateMsg>("/joint_states", msg => JointStateReceived?.Invoke(msg));
-            Ros.Subscribe<JointTrajectoryMsg>("/deictic/preview", OnPreview);
             if (config.connectOnStart) Ros.Connect();
         }
         void OnStatus(StringMsg message)
@@ -171,7 +181,7 @@ namespace Deictic
         }
         void Update()
         {
-            if (Ros != null && Ros.HasConnectionThread && !Ros.HasConnectionError && Time.realtimeSinceStartup >= nextClockRequest)
+            if (DirectCommandsAllowed && Ros != null && Ros.HasConnectionThread && !Ros.HasConnectionError && Time.realtimeSinceStartup >= nextClockRequest)
             {
                 clockRequest = RosFrames.LocalNow;
                 Ros.Publish("/deictic/time_sync/request", new Float64Msg(clockRequest));
@@ -201,7 +211,7 @@ namespace Deictic
         }
         public void PublishHeadset(Transform head)
         {
-            if (Ros != null && head != null) Ros.Publish("/deictic/headset_pose", RosFrames.StampedPose(head.position, head.rotation, "headset_world"));
+            if (DirectCommandsAllowed && Ros != null && head != null) Ros.Publish("/deictic/headset_pose", RosFrames.StampedPose(head.position, head.rotation, "headset_world"));
         }
         public bool Commit(Vector3 worldPoint, Vector3 worldNormal)
         {
@@ -243,7 +253,7 @@ namespace Deictic
         public void Cancel()
         {
             TeleopStopRequested?.Invoke();
-            Ros?.Publish("/deictic/cancel", new EmptyMsg());
+            if (DirectCommandsAllowed) Ros?.Publish("/deictic/cancel", new EmptyMsg());
             ClearPreview();
             Feedback = "Cancel requested";
         }
@@ -268,9 +278,12 @@ namespace Deictic
             trackingInvalidatedLocalTime = RosFrames.LocalNow;
             HasAlignment = false;
             ClearPreview();
-            Ros?.Publish("/deictic/cancel", new EmptyMsg());
-            Ros?.Publish("/deictic/registration_failure", new StringMsg(JsonUtility.ToJson(
-                new TrackingFailure { stamp = RosFrames.Now, reason = reason, event_type = eventType })));
+            if (DirectCommandsAllowed)
+            {
+                Ros?.Publish("/deictic/cancel", new EmptyMsg());
+                Ros?.Publish("/deictic/registration_failure", new StringMsg(JsonUtility.ToJson(
+                    new TrackingFailure { stamp = RosFrames.Now, reason = reason, event_type = eventType })));
+            }
             Feedback = reason + "; waiting for post-event registration";
         }
         public void SetTeleopIntent(bool busy)
@@ -305,7 +318,7 @@ namespace Deictic
         public bool PublishTeleop(bool clutch, bool leftTracked, bool rightTracked,
             Vector3 left, Quaternion leftRotation, Vector3 right, Quaternion rightRotation)
         {
-            if (Ros == null || !Ros.HasConnectionThread || Ros.HasConnectionError || (clutch && !CanTeleoperate)) return false;
+            if (!DirectCommandsAllowed || Ros == null || !Ros.HasConnectionThread || Ros.HasConnectionError || (clutch && !CanTeleoperate)) return false;
             // A false packet is also sent when clock quality has been lost: it
             // can only request a hold, and the server watchdog remains decisive.
             Ros.Publish("/deictic/teleop/input", new StringMsg(JsonUtility.ToJson(new TeleopInput
@@ -330,7 +343,7 @@ namespace Deictic
         }
         public bool PublishRobotHead(bool active, bool tracked, Quaternion bodyRelativeRotation)
         {
-            if (Ros == null || !Ros.HasConnectionThread || Ros.HasConnectionError || (active && !CanTrackRobotHead)) return false;
+            if (!DirectCommandsAllowed || Ros == null || !Ros.HasConnectionThread || Ros.HasConnectionError || (active && !CanTrackRobotHead)) return false;
             Ros.Publish("/k1/head/command", new StringMsg(JsonUtility.ToJson(new RobotHeadCommand
             {
                 session_id = teleopSession, sequence = ++headSequence, stamp = RosFrames.Now,

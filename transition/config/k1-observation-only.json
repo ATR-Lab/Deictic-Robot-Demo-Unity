@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "deployment_id": null,
+  "robot": {
+    "serial": null,
+    "firmware": null,
+    "model": "K1"
+  },
+  "control_host": {
+    "host_id": null,
+    "os_release": null,
+    "python_abi": null,
+    "cpu_architecture": null
+  },
+  "sdk": {
+    "distribution": "booster_robotics_sdk_python",
+    "version": "1.6.3",
+    "artifact_sha256": null,
+    "network_binding": null,
+    "vendor_dds_domain": null,
+    "robot_name": null
+  },
+  "physical_actuation_enabled": false,
+  "controller": {
+    "allowed_mode": null,
+    "allowed_body_control": null,
+    "support_record": null,
+    "independent_stop_record": null
+  },
+  "ownership": {
+    "enforcement_record": null,
+    "watchdog_record": null
+  },
+  "observation": {
+    "max_age_s": null,
+    "max_gap_s": null,
+    "max_skew_s": null,
+    "max_transport_uncertainty_s": null,
+    "max_arm_speed_rad_s": null,
+    "calibration_digest": null
+  },
+  "profiles": {
+    "point_a": null,
+    "point_b": null,
+    "home": null
+  },
+  "commissioning": {
+    "receipt_id": null,
+    "manifest_sha256": null,
+    "reviewer": null,
+    "approved_at": null,
+    "expires_at": null
+  }
+}

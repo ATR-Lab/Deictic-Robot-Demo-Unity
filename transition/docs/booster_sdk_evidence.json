@@ -1,0 +1,24 @@
+{
+  "checked_date": "2026-09-23",
+  "source_repository": "https://github.com/BoosterRobotics/booster_robotics_sdk",
+  "source_revision": "87a9a26d06a94ddd50968e7576f1170f6fa5a80f",
+  "python_distribution": "booster_robotics_sdk_python",
+  "python_version": "1.6.3",
+  "wheel": "booster_robotics_sdk_python-1.6.3-cp312-cp312-manylinux_2_34_x86_64.whl",
+  "wheel_sha256": "144d50f13ddbe31de56f508df615d070352eebb2ca439be8f6f3723d98067ebe",
+  "wheel_url": "https://files.pythonhosted.org/packages/b7/66/f3a92eca4057b673def81ec2749fadb015c57536114909fb2db5ce1f50e5/booster_robotics_sdk_python-1.6.3-cp312-cp312-manylinux_2_34_x86_64.whl",
+  "verification": "Downloaded and hash-checked wheel; imported extracted module on Ubuntu Python3.12 without client construction, ChannelFactory initialization, subscriptions, or actuation. Read Python method docstrings and class attributes. This checks API availability only.",
+  "verified_signatures": {
+    "MoveHandEndEffectorV2": "(Posture, int, HandIndex) -> None",
+    "StopHandEndEffector": "() -> None",
+    "GetFrameTransform": "(Frame, Frame) -> Transform",
+    "GetRobotInfo": "() -> GetRobotInfoResponse",
+    "GetStatus": "() -> GetStatusResponse",
+    "B1LowStateSubscriber": "(handler) -> subscriber; InitChannel()/InitChannelWithName(robot_name)"
+  },
+  "source_file_sha256": {
+    "include/booster/robot/b1/b1_loco_client.hpp": "a660ad38e363acce1fa938cd570b1418f929aaead2e16f0bf6011f38a9d04a2f",
+    "include/booster/robot/b1/b1_api_const.hpp": "d4609eb82757ad8cc1e12c763aff4ac69ac017d5dc4e04386ca1b7a460aab612",
+    "sdk_pybind_b1_example.py": "f40432c9dbfa4c55c1701d2bea7e5de4c235ce3a7388bd03bd600dd0992f76a3"
+  }
+}

@@ -1,0 +1,171 @@
+{
+  "schema_version": 1,
+  "stage": "S1",
+  "permit_class": "simulation",
+  "scope": "native_simulation",
+  "run_started": true,
+  "planned_count": 1,
+  "attempted_count": 2,
+  "refused_count": 0,
+  "attempts": [
+    {
+      "id": "lifecycle-initial",
+      "stratum": "native-fixed-right-arm",
+      "outcome": "invalid_artifact",
+      "possible_actuation": true,
+      "evidence_refs": [
+        "initial_worker_ledger"
+      ],
+      "reason": "Initial lifecycle executed but receipt write failed with PermissionError in a root-owned Docker output directory."
+    },
+    {
+      "id": "lifecycle-repeated",
+      "stratum": "native-fixed-right-arm",
+      "outcome": "passed",
+      "possible_actuation": true,
+      "evidence_refs": [
+        "lifecycle",
+        "runtime",
+        "runtime_events"
+      ],
+      "reason": "Repeated native lifecycle and scripted runtime reports indicate success; repetition retained in actual count."
+    }
+  ],
+  "refusals": [],
+  "artifacts": {
+    "runtime_source": {
+      "path": "transition/src/transition_autonomy/runtime.py",
+      "role": "source",
+      "required": true,
+      "sha256": "5da6b19775ae6525ec468a88c6c10cb9d7d36565c556e11413e6968e3468c116"
+    },
+    "task": {
+      "path": "transition/examples/k1_pointing.json",
+      "role": "configuration",
+      "required": true,
+      "sha256": "df6cd930a0c5a7c557e0f991bc51ab4c467ad510a889ac56c82827470f16eb03"
+    },
+    "profiles": {
+      "path": "transition/config/isaac_k1.json",
+      "role": "configuration",
+      "required": true,
+      "sha256": "d42d24eac4aa95764fc0fc54266806cd8d599f16286f6838c561f3fe0cf44edf"
+    },
+    "lifecycle": {
+      "path": "output/transition-validation/native/lifecycle.json",
+      "role": "evidence",
+      "required": true,
+      "sha256": "825da43d671054d4e53e679a13c038309387c4ac265baea714eeb793c1c1f129"
+    },
+    "runtime": {
+      "path": "output/transition-validation/native/runtime-report.json",
+      "role": "evidence",
+      "required": true,
+      "sha256": "6ee0187839c65969d375de9fa1bdc05d7e218dc8e8228e438ca5c5dc90cf50e1"
+    },
+    "runtime_events": {
+      "path": "output/transition-validation/native/runtime-events.jsonl",
+      "role": "evidence",
+      "required": true,
+      "sha256": "33793d4b477f621f353223268a4853787bd1fcf15096ffe19b414d8000a19770"
+    },
+    "initial_worker_ledger": {
+      "path": "output/transition-validation/native/initial-worker-ledger.jsonl",
+      "role": "evidence",
+      "required": true
+    },
+    "worker_release_provenance": {
+      "path": "output/transition-validation/native/worker-source-manifest.json",
+      "role": "evidence",
+      "required": true
+    }
+  },
+  "predicates": {
+    "native_profiles": {
+      "status": "passed",
+      "criterion": "A/B/home report measured supported endpoint success.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Inspected native JSON receipt reports the stated assertion.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "advancing_sample_dwell": {
+      "status": "passed",
+      "criterion": "Each completed profile reports at least configured advancing simulation-time dwell.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Inspected native JSON receipt reports the stated assertion.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "duplicate_suppression": {
+      "status": "passed",
+      "criterion": "Repeated same command ID reports one retained execution.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Inspected native JSON receipt reports the stated assertion.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "stop_confirmation": {
+      "status": "passed",
+      "criterion": "Stop lifecycle reports canceled after measured stillness.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Inspected native JSON receipt reports the stated assertion.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "lost_response_reconciliation": {
+      "status": "passed",
+      "criterion": "Lost response is reconciled by status without replay.",
+      "evidence_refs": [
+        "lifecycle"
+      ],
+      "reason": "Inspected native JSON receipt reports the stated assertion.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "runtime_decisions": {
+      "status": "passed",
+      "criterion": "Three scripted decisions match independent rubric without replacing explicit local selections.",
+      "evidence_refs": [
+        "runtime",
+        "runtime_events"
+      ],
+      "reason": "Inspected native JSON receipt reports the stated assertion.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "journal_integrity": {
+      "status": "passed",
+      "criterion": "Runtime journal verification is valid.",
+      "evidence_refs": [
+        "runtime",
+        "runtime_events"
+      ],
+      "reason": "Inspected native JSON receipt reports the stated assertion.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    },
+    "exact_release_source_match": {
+      "status": "unknown",
+      "criterion": null,
+      "evidence_refs": [
+        "worker_release_provenance"
+      ],
+      "reason": "The complete worker source manifest for the executed revision has not yet been retained locally.",
+      "disposition": "No physical motion or stage advancement; retain unresolved evidence."
+    }
+  },
+  "final_state": {
+    "motion_state": "still",
+    "task_outcome": "succeeded",
+    "arm_state": "not_applicable",
+    "disposition": "Simulation only. Retain initial invalid-artifact attempt and do not treat this over-quota diagnostic campaign as a predeclared acceptance pass."
+  },
+  "notes": [
+    "Native lifecycle and runtime succeeded individually; this report preserves the first failed artifact and repeated attempt.",
+    "Initial worker ledger remains remote at transition/.runtime/native-20260924/command_ledger.jsonl until copied to the declared evidence path.",
+    "Sources changed after native validation for DDS/output/cleanup repairs; exact worker source provenance and a fresh declared campaign remain required.",
+    "No physical K1 motion or human participant data."
+  ]
+}

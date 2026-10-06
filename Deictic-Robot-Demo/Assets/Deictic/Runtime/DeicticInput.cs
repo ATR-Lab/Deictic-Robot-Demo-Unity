@@ -11,6 +11,7 @@ namespace Deictic
         public Transform pointer;
         public Camera viewCamera;
         public DeicticCameraView cameraView;
+        public TransitionTaskPanel transitionPanel;
         public BimanualTeleop teleop;
         public RobotHeadTracking robotHead;
         public bool synthetic;
@@ -28,6 +29,8 @@ namespace Deictic
         Vector3 trackingSpaceScale;
         readonly TriggerReleaseIntent triggerIntent = new TriggerReleaseIntent();
         readonly IndexTriggerState standaloneRightTrigger = new IndexTriggerState();
+        readonly IndexTriggerState standaloneLeftTrigger = new IndexTriggerState();
+        readonly TransitionClickIntent taskClick = new TransitionClickIntent();
         bool rightWasHeld;
 
         void Start()
@@ -56,6 +59,9 @@ namespace Deictic
             if (robotHead && robotHead.isActiveAndEnabled) robotHead.Tick(xrActive);
             if (teleop && teleop.isActiveAndEnabled) teleop.Tick(xrActive);
             bool rightHeld;
+            standaloneLeftTrigger.Sample(xrActive ? OVRInput.Get(OVRInput.RawAxis1D.LIndexTrigger,
+                OVRInput.Controller.LTouch) : 0, xrActive);
+            bool leftHeld = teleop && teleop.isActiveAndEnabled ? teleop.LeftHeld : standaloneLeftTrigger.Held;
             if (teleop && teleop.isActiveAndEnabled) rightHeld = teleop.RightHeld;
             else
             {
@@ -72,7 +78,7 @@ namespace Deictic
             bool cancel = (xrActive && OVRInput.GetDown(OVRInput.Button.Two, OVRInput.Controller.RTouch)) ||
                 (k != null && k.escapeKey.wasPressedThisFrame);
             bool viewShortcut = !suppress && cameraView && cameraView.isActiveAndEnabled && k != null && k.vKey.wasPressedThisFrame;
-            if (cancel) bridge.Cancel();
+            if (cancel) { if (transitionPanel) transitionPanel.RequestStop(); else bridge.Cancel(); }
             else if (viewShortcut) cameraView.ToggleButton.onClick.Invoke();
             if (!head) return;
             if (!synthetic)
@@ -83,6 +89,7 @@ namespace Deictic
                 bridge.SetHeadTrackingValid(valid);
                 if (!valid)
                 {
+                    taskClick.Cancel();
                     HasCandidate = false;
                     cursor.SetActive(false);
                     pointerLine.positionCount = 0;
@@ -94,13 +101,16 @@ namespace Deictic
                 bridge.PublishHeadset(head);
                 nextPose = Time.unscaledTime + 1f / Mathf.Max(1, bridge.settings.headsetPublishHz);
             }
-            if (suppress)
+            bool taskChord = transitionPanel && ((leftHeld && rightHeld) || taskClick.BlockedUntilRelease);
+            if (suppress || taskChord)
             {
+                taskClick.Step(triggerPressed, triggerReleased, leftHeld, rightHeld, -1);
                 HasCandidate = false;
                 cursor.SetActive(false);
                 pointerLine.positionCount = 0;
                 if (cameraView) cameraView.SetHovered(false);
-                InputSource = teleop.Feedback;
+                if (transitionPanel) transitionPanel.Hover(-1);
+                InputSource = teleop ? teleop.Feedback : "Release both triggers to use task controls";
                 return;
             }
             Ray headRay = new Ray(head.position, head.forward);
@@ -109,11 +119,13 @@ namespace Deictic
                 OVRInput.GetControllerPositionTracked(OVRInput.Controller.RTouch);
             Ray ray = tracked ? new Ray(pointer.position, pointer.forward) : headRay;
             InputSource = tracked ? "Controller pointer + head direction" : "Head direction";
+            bool desktopPointer = false;
 #if UNITY_EDITOR || UNITY_STANDALONE
             if (!tracked && viewCamera && Mouse.current != null && synthetic)
             {
                 ray = viewCamera.ScreenPointToRay(Mouse.current.position.ReadValue());
                 InputSource = "Desktop mouse + head direction";
+                desktopPointer = true;
                 tracked = true;
             }
 #endif
@@ -121,25 +133,39 @@ namespace Deictic
             bool pointerHit = tracked && Raycast(ray, out p);
             Vector3 uiPoint = default;
             bool overToggle = cameraView && cameraView.PointAtToggle(ray, out uiPoint);
+            int taskControl = -1;
+            Vector3 taskPoint = default;
+            bool overTask = transitionPanel && transitionPanel.PointAtControl(ray, out taskControl, out taskPoint);
+            if (overTask && overToggle && Vector3.Distance(ray.origin, uiPoint) < Vector3.Distance(ray.origin, taskPoint)) overTask = false;
+            if (overTask) { overToggle = false; uiPoint = taskPoint; }
+            if (transitionPanel) transitionPanel.Hover(overTask ? taskControl : -1);
             if (cameraView) cameraView.SetHovered(overToggle);
             Vector3 point = default;
-            HasCandidate = !overToggle && (!cameraView || !cameraView.RobotView) &&
+            HasCandidate = bridge.DirectCommandsAllowed && !overTask && !overToggle && (!cameraView || !cameraView.RobotView) &&
                 TargetResolver.Resolve(headHit, h, pointerHit, p, bridge.settings.agreementDistance, out point, out candidateNormal);
             Candidate = point;
             cursor.SetActive(HasCandidate);
             if (HasCandidate) cursor.transform.position = point;
-            bool showPointer = (tracked || overToggle) && (!cameraView || !cameraView.RobotView || overToggle);
+            bool showPointer = (tracked || overToggle || overTask) && (!cameraView || !cameraView.RobotView || overToggle || overTask);
             pointerLine.positionCount = showPointer ? 2 : 0;
-            if (showPointer) { pointerLine.SetPosition(0, ray.origin); pointerLine.SetPosition(1, overToggle ? uiPoint : pointerHit ? p.point : ray.GetPoint(2)); }
+            if (showPointer) { pointerLine.SetPosition(0, ray.origin); pointerLine.SetPosition(1, overToggle || overTask ? uiPoint : pointerHit ? p.point : ray.GetPoint(2)); }
             if (cancel || viewShortcut)
             {
                 triggerIntent.Cancel();
+                taskClick.Cancel();
                 HasCandidate = false;
                 cursor.SetActive(false);
                 return;
             }
-            if (triggerPressed) triggerIntent.Begin(overToggle, HasCandidate, Candidate, candidateNormal);
-            if (triggerReleased)
+            if (transitionPanel)
+            {
+                int clicked = taskClick.Step(triggerPressed, triggerReleased, leftHeld, rightHeld,
+                    overToggle ? 0 : overTask && taskControl >= 0 ? taskControl + 1 : -1);
+                if (clicked == 0) cameraView.ToggleButton.onClick.Invoke();
+                else if (clicked > 0) transitionPanel.Click(clicked - 1);
+            }
+            else if (triggerPressed) triggerIntent.Begin(overToggle, HasCandidate, Candidate, candidateNormal);
+            if (!transitionPanel && triggerReleased)
             {
                 var intent = triggerIntent.Release(overToggle, HasCandidate, Candidate, bridge.settings.agreementDistance,
                     out Vector3 selectedPoint, out Vector3 selectedNormal);
@@ -149,7 +175,12 @@ namespace Deictic
             bool commit = false;
             bool execute = xrActive && OVRInput.GetDown(OVRInput.Button.One, OVRInput.Controller.RTouch);
             if (k != null) { commit |= k.spaceKey.wasPressedThisFrame; execute |= k.enterKey.wasPressedThisFrame; }
-            if (cameraView && overToggle && (commit || (Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame)))
+            // Mouse clicks belong only to the mouse-derived ray. A tracked XR ray
+            // must not activate because an unrelated desktop location was clicked.
+            bool mouseCommit = desktopPointer && Mouse.current != null && Mouse.current.leftButton.wasPressedThisFrame;
+            if (overTask && (commit || mouseCommit))
+                transitionPanel.Click(taskControl);
+            else if (cameraView && overToggle && (commit || mouseCommit))
             {
                 cameraView.ToggleButton.onClick.Invoke();
                 HasCandidate = false;
@@ -198,6 +229,7 @@ namespace Deictic
             robotHead?.Interrupt();
             triggerIntent.Cancel();
             if (!synthetic) bridge.InvalidateTracking("Headset tracking origin changed", "origin_changed");
+            taskClick.Cancel();
             RememberTrackingSpace();
         }
         void OnRecentered()
@@ -206,6 +238,7 @@ namespace Deictic
             robotHead?.Interrupt();
             triggerIntent.Cancel();
             RememberTrackingSpace();
+            taskClick.Cancel();
             if (synthetic) return;
             bridge.InvalidateTracking("Headset recentered", "recentered");
         }
@@ -216,10 +249,10 @@ namespace Deictic
             {
                 case "reach there": case "select target": Commit(); break;
                 case "execute": bridge.Execute(); break;
-                case "cancel": case "stop": bridge.Cancel(); break;
+                case "cancel": case "stop": if (transitionPanel) transitionPanel.RequestStop(); else bridge.Cancel(); break;
             }
         }
-        void OnTeleopInterrupted() { triggerIntent.Cancel(); rightWasHeld = false; }
+        void OnTeleopInterrupted() { triggerIntent.Cancel(); taskClick.Cancel(); rightWasHeld = false; }
         void OnApplicationFocus(bool focused) { if (!focused) OnTeleopInterrupted(); }
         void OnApplicationPause(bool paused) { if (paused) OnTeleopInterrupted(); }
         void OnDestroy()

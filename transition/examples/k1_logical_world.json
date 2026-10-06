@@ -1,0 +1,5 @@
+{
+  "point_a": {"duration": 1.0, "effects": {"remote.pointed_target": "A"}},
+  "point_b": {"duration": 1.0, "effects": {"remote.pointed_target": "B"}},
+  "home": {"duration": 1.0, "effects": {"remote.pointed_target": null}}
+}

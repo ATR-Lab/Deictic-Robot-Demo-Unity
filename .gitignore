@@ -32,3 +32,11 @@ Deictic-Robot-Demo/RuntimeActionBindings.json
 Deictic-Robot-Demo/Assets/StreamingAssets/RuntimeActionBindings.json*
 Deictic-Robot-Demo/Assets/_Recovery/
 Deictic-Robot-Demo/Assets/_Recovery.meta
+# Transition task runtime products and local Unity connection settings.
+transition/.runtime/
+transition/runs/
+transition/artifacts/
+transition/assets/
+transition/dist/
+Deictic-Robot-Demo/Assets/StreamingAssets/transition-runtime.json
+Deictic-Robot-Demo/Assets/StreamingAssets/transition-runtime.json.meta
